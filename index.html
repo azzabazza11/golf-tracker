@@ -3100,6 +3100,7 @@ let pocketSwipeBound = false;
 let pocketSwipeStartX = 0;
 let pocketSwipeOrigin = 0;
 let pocketSwipeMax = 0;
+let pocketSwipeDragging = false;
 const POCKET_IDLE_MS = 20000;
 
 function syncPocketLockDistance(text) {
@@ -3183,6 +3184,7 @@ function bindPocketSwipe() {
   }
 
   function onStart(clientX) {
+    pocketSwipeDragging = true;
     pocketSwipeStartX = clientX;
     pocketSwipeOrigin = 0;
     const m = knob.style.transform.match(/translateX\((-?\d+(?:\.\d+)?)px\)/);
@@ -3191,16 +3193,18 @@ function bindPocketSwipe() {
   }
 
   function onMove(clientX) {
-    if (!pocketLocked) return;
+    if (!pocketLocked || !pocketSwipeDragging) return;
     const dx = clientX - pocketSwipeStartX;
     let x = Math.max(0, Math.min(pocketSwipeMax, pocketSwipeOrigin + dx));
     knob.style.transform = `translateX(${x}px)`;
-    if (x >= pocketSwipeMax * 0.78) {
+    if (pocketSwipeMax > 0 && x >= pocketSwipeMax * 0.78) {
+      pocketSwipeDragging = false;
       unlockPocketLock();
     }
   }
 
   function onEnd() {
+    pocketSwipeDragging = false;
     if (!pocketLocked) return;
     resetPocketSwipeKnob();
   }
@@ -3208,13 +3212,11 @@ function bindPocketSwipe() {
   track.addEventListener("pointerdown", e => {
     if (!pocketLocked) return;
     e.preventDefault();
-    track.setPointerCapture?.(e.pointerId);
+    try { track.setPointerCapture(e.pointerId); } catch (_) {}
     onStart(e.clientX);
   }, { passive: false });
 
   track.addEventListener("pointermove", e => {
-    if (!pocketLocked) return;
-    if (e.buttons === 0 && e.pointerType === "mouse") return;
     onMove(e.clientX);
   }, { passive: true });
 
