@@ -1016,7 +1016,7 @@
   </div>
 
 <script>
-const APP_VERSION = "1.4.0";
+const APP_VERSION = "1.4.1";
 const PAGES_URL = "https://azzabazza11.github.io/golf-tracker/";
 const CLUBS = ["Dr","3w","5w","Hybrid","3i","4i","5i","6i","7i","8i","9i","PW","GW","SW","LW","Putter"];
 const PIN_ACCEPT_M = 10;
@@ -2863,6 +2863,8 @@ async function openMapSession(session) {
   updateMapWalkTrackButton();
   await ensureCourseDefaultPhoto(session.courseId, session.course.holes.length);
   await loadMapImageForSession();
+  applyCourseSharedMapXformIfNeeded();
+  updateMapLockUI();
   requestAnimationFrame(() => {
     resizeMapCanvas();
     drawHoleMap();
@@ -2917,6 +2919,8 @@ async function mapStepHole(delta) {
   ensureCourseHole(next, mapSession.course);
   updateMapHoleNavButtons();
   await loadMapImageForSession();
+  applyCourseSharedMapXformIfNeeded();
+  updateMapLockUI();
   requestAnimationFrame(() => {
     resizeMapCanvas();
     drawHoleMap();
@@ -3044,8 +3048,37 @@ function getActiveMapXform() {
   return isMapLocked() ? getMapView() : getMapAlign();
 }
 
+function holeHasGpsCalib(holeIndex) {
+  if (!mapSession) return false;
+  const h = ensureCourseHole(holeIndex, mapSession.course);
+  const round = getMapSessionRound();
+  const rh = round?.holes?.[holeIndex];
+  return !!(h?.photoCalib?.tee && h?.photoCalib?.pin && rh?.teePosition && h.pin);
+}
+
+/** Keep course-photo pan/zoom shared across holes while setting tee/pin. */
+function persistCourseSharedMapXform() {
+  if (!mapSession || mapPhotoSource !== "course") return;
+  if (holeHasGpsCalib(mapSession.holeIndex)) return;
+  const c = mapSession.course;
+  if (!c) return;
+  c.sharedMapAlign = { ...getMapAlign() };
+  c.sharedMapView = { ...getMapView() };
+}
+
+function applyCourseSharedMapXformIfNeeded() {
+  if (!mapSession || mapPhotoSource !== "course") return;
+  const c = mapSession.course;
+  if (!c?.sharedMapAlign) return;
+  if (holeHasGpsCalib(mapSession.holeIndex)) return;
+  const h = ensureCourseHole(mapSession.holeIndex, c);
+  h.mapAlign = { ...c.sharedMapAlign };
+  if (c.sharedMapView) h.mapView = { ...c.sharedMapView };
+}
+
 function persistMapAlign() {
   if (!mapSession) return;
+  persistCourseSharedMapXform();
   const idx = courses.findIndex(c => c.id === mapSession.courseId);
   if (idx >= 0) courses[idx] = mapSession.course;
   saveData();
