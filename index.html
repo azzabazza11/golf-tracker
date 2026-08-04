@@ -973,6 +973,11 @@
       <p class="modal-note" style="margin-bottom:14px">
         Shot Tracker is free to use and will stay free — no paywall, no subscription.
       </p>
+      <p class="modal-note" style="margin-bottom:10px">
+        If Shot Tracker helped your round and you want to shout me a coffee, thank you for backing the project.
+      </p>
+      <button type="button" class="btn-warning" style="width:100%" onclick="openSupportLink()">Support on Ko-fi</button>
+      <p class="modal-note" style="margin-top:8px">Thanks for helping keep it simple, free, and improving.</p>
       <p class="modal-note" style="margin-top:12px">App version v<span id="settings-current-version"></span></p>
     </div>
 
@@ -1317,8 +1322,9 @@
   </div>
 
 <script>
-const APP_VERSION = "1.4.12";
+const APP_VERSION = "1.4.13";
 const PAGES_URL = "https://azzabazza11.github.io/golf-tracker/";
+const SUPPORT_URL = "https://ko-fi.com/aaroncallinan";
 const CLUBS = ["Dr","3w","5w","Hybrid","3i","4i","5i","6i","7i","8i","9i","PW","GW","SW","LW","Putter"];
 const PIN_ACCEPT_M = 10;
 const PIN_LOCK_M = 5;
@@ -2520,6 +2526,8 @@ function confirmTeeOff() {
   updatePlayUI();
   recordTestEvent("tee_off");
 }
+
+function openConfirmModal(dist) {
   document.getElementById("confirm-club-used").textContent = clubForCurrentShot || "—";
   document.getElementById("confirm-distance").textContent = Math.round(dist) + " m";
   document.getElementById("adjust-distance").value = Math.round(dist);
@@ -2700,6 +2708,8 @@ function saveRoundAndHome() {
   showScreen("home");
   recordTestEvent("save_exit");
 }
+
+function roundHasProgress(round) {
   if (!round?.holes) return false;
   return round.holes.some(h =>
     h.teePosition ||
@@ -4835,6 +4845,11 @@ async function shareAppLink() {
   } catch (e) {
     showToast(url);
   }
+}
+
+function openSupportLink() {
+  if (!SUPPORT_URL) return;
+  window.open(SUPPORT_URL, "_blank", "noopener,noreferrer");
 }
 
 function onLightModeToggle(on) {
