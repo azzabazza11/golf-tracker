@@ -248,6 +248,135 @@
       text-align: center;
     }
     .toast.show { display: block; }
+
+    /* Record star — floats until tapped or swiped away */
+    #star-badge {
+      position: fixed;
+      top: max(18px, env(safe-area-inset-top, 0px));
+      right: 14px;
+      z-index: 520;
+      width: 54px;
+      height: 54px;
+      border-radius: 50%;
+      border: 2px solid rgba(255, 255, 255, 0.85);
+      background: radial-gradient(circle at 32% 28%, #fffce8 0%, #ffe566 42%, #f0a020 100%);
+      box-shadow:
+        0 6px 22px rgba(240, 160, 32, 0.55),
+        0 0 0 4px rgba(255, 214, 80, 0.25);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      font-size: 28px;
+      line-height: 1;
+      cursor: pointer;
+      touch-action: none;
+      user-select: none;
+      -webkit-user-select: none;
+      color: #5c3b00;
+      animation: star-float 2.6s ease-in-out infinite;
+    }
+    #star-badge.show { display: flex; }
+    #star-badge.dragging {
+      animation: none;
+      transition: none;
+    }
+    #star-badge .star-glyph {
+      filter: drop-shadow(0 1px 0 rgba(255,255,255,0.6));
+      pointer-events: none;
+    }
+    #star-badge .star-count {
+      position: absolute;
+      top: -4px;
+      left: -4px;
+      min-width: 20px;
+      height: 20px;
+      padding: 0 5px;
+      border-radius: 10px;
+      background: #1a1200;
+      color: #ffe566;
+      font-size: 11px;
+      font-weight: 700;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      border: 1.5px solid #ffe566;
+    }
+    #star-badge .star-count.show { display: flex; }
+    @keyframes star-float {
+      0%, 100% { transform: translateY(0) rotate(-6deg); }
+      50% { transform: translateY(-11px) rotate(6deg); }
+    }
+
+    #modal-star .star-celebrate {
+      background:
+        radial-gradient(ellipse at 50% 0%, rgba(255,255,255,0.55), transparent 55%),
+        linear-gradient(165deg, #fff8d6 0%, #ffe14a 38%, #ffb020 100%);
+      color: #1a1200;
+      text-align: center;
+      border: 2px solid rgba(255, 255, 255, 0.7);
+      box-shadow: 0 12px 40px rgba(240, 160, 32, 0.45);
+      max-width: 340px;
+    }
+    #modal-star .star-celebrate-eyebrow {
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: #8a5a00;
+      margin-bottom: 8px;
+    }
+    #modal-star .star-celebrate-title {
+      font-size: 28px;
+      font-weight: 800;
+      line-height: 1.15;
+      margin-bottom: 6px;
+      text-shadow: 0 1px 0 rgba(255,255,255,0.5);
+    }
+    #modal-star .star-celebrate-headline {
+      font-size: 42px;
+      font-weight: 800;
+      line-height: 1.05;
+      margin: 10px 0 8px;
+      color: #5c2e00;
+    }
+    #modal-star .star-celebrate-detail {
+      font-size: 15px;
+      font-weight: 600;
+      color: #6b4500;
+      line-height: 1.4;
+      margin-bottom: 4px;
+    }
+    #modal-star .star-celebrate-list {
+      text-align: left;
+      margin: 16px 0 4px;
+      padding: 0;
+      list-style: none;
+    }
+    #modal-star .star-celebrate-list li {
+      background: rgba(255,255,255,0.45);
+      border-radius: 12px;
+      padding: 12px 14px;
+      margin-bottom: 8px;
+    }
+    #modal-star .star-celebrate-list .t {
+      font-weight: 800;
+      font-size: 16px;
+      display: block;
+    }
+    #modal-star .star-celebrate-list .d {
+      font-size: 13px;
+      font-weight: 600;
+      color: #6b4500;
+      margin-top: 2px;
+    }
+    #modal-star .btn-star-ok {
+      width: 100%;
+      margin-top: 16px;
+      background: #1a1200;
+      color: #ffe566;
+      font-weight: 700;
+    }
+
     .setup-banner {
       background: var(--pill);
       border: 1px solid var(--warning);
@@ -628,6 +757,22 @@
   </div>
 
   <div id="toast" class="toast"></div>
+
+  <button type="button" id="star-badge" class="star-badge" aria-label="View record" title="New record">
+    <span class="star-count" id="star-count" aria-hidden="true">1</span>
+    <span class="star-glyph" aria-hidden="true">★</span>
+  </button>
+
+  <div class="modal" id="modal-star" onclick="if(event.target===this)dismissStarCelebration()">
+    <div class="modal-content star-celebrate" onclick="event.stopPropagation()">
+      <div class="star-celebrate-eyebrow" id="star-eyebrow">Record</div>
+      <div class="star-celebrate-title" id="star-title">Nice!</div>
+      <div class="star-celebrate-headline" id="star-headline"></div>
+      <div class="star-celebrate-detail" id="star-detail"></div>
+      <ul class="star-celebrate-list" id="star-list" style="display:none"></ul>
+      <button type="button" class="btn-star-ok" onclick="dismissStarCelebration()">Awesome</button>
+    </div>
+  </div>
 
   <!-- HOME -->
   <div id="screen-home" class="screen active">
@@ -1016,7 +1161,7 @@
   </div>
 
 <script>
-const APP_VERSION = "1.4.4";
+const APP_VERSION = "1.4.6";
 const PAGES_URL = "https://azzabazza11.github.io/golf-tracker/";
 const CLUBS = ["Dr","3w","5w","Hybrid","3i","4i","5i","6i","7i","8i","9i","PW","GW","SW","LW","Putter"];
 const PIN_ACCEPT_M = 10;
@@ -1104,6 +1249,7 @@ let mapPhotoSource = null; // 'course' | 'hole' | null
 let mapFit = null; // { ox, oy, scale } GPS meters → canvas
 let mapPointers = new Map();
 let mapLastPinchDist = null;
+let mapLastPinchMid = null; // client coords midpoint while pinching
 let mapGesturesBound = false;
 let mapGeoOrigin = null;
 let mapHitShots = []; // { shotIndex, x, y, r } in CSS canvas pixels
@@ -1166,6 +1312,259 @@ function showToast(msg) {
   setTimeout(() => el.classList.remove("show"), 3500);
 }
 
+// ---------- Record star (floating ★ → celebratory popup) ----------
+let starQueue = [];
+let starSwipe = null;
+
+function enqueueStar(ach) {
+  if (!ach || !ach.title) return;
+  starQueue.push({
+    title: ach.title,
+    headline: ach.headline || "",
+    detail: ach.detail || "",
+    eyebrow: ach.eyebrow || "New record"
+  });
+  updateStarBadge();
+}
+
+function updateStarBadge() {
+  const badge = document.getElementById("star-badge");
+  const count = document.getElementById("star-count");
+  if (!badge) return;
+  if (!starQueue.length) {
+    badge.classList.remove("show", "dragging");
+    badge.style.transform = "";
+    badge.style.opacity = "";
+    if (count) count.classList.remove("show");
+    return;
+  }
+  badge.classList.add("show");
+  if (count) {
+    if (starQueue.length > 1) {
+      count.textContent = String(starQueue.length);
+      count.classList.add("show");
+    } else {
+      count.classList.remove("show");
+    }
+  }
+}
+
+function clearStarQueue() {
+  starQueue = [];
+  updateStarBadge();
+}
+
+function openStarCelebration() {
+  if (!starQueue.length) return;
+  const items = starQueue.slice();
+  starQueue = [];
+  updateStarBadge();
+
+  const eyebrow = document.getElementById("star-eyebrow");
+  const title = document.getElementById("star-title");
+  const headline = document.getElementById("star-headline");
+  const detail = document.getElementById("star-detail");
+  const list = document.getElementById("star-list");
+
+  if (items.length === 1) {
+    const a = items[0];
+    if (eyebrow) eyebrow.textContent = a.eyebrow;
+    if (title) title.textContent = a.title;
+    if (headline) {
+      headline.textContent = a.headline || "";
+      headline.style.display = a.headline ? "" : "none";
+    }
+    if (detail) detail.textContent = a.detail || "";
+    if (list) {
+      list.style.display = "none";
+      list.innerHTML = "";
+    }
+  } else {
+    if (eyebrow) eyebrow.textContent = "Records";
+    if (title) title.textContent = "What a stretch!";
+    if (headline) {
+      headline.textContent = items.length + " highlights";
+      headline.style.display = "";
+    }
+    if (detail) detail.textContent = "You stacked some personal bests.";
+    if (list) {
+      list.style.display = "";
+      list.innerHTML = items.map(a =>
+        `<li><span class="t">${escapeHtml(a.title)}${a.headline ? " · " + escapeHtml(a.headline) : ""}</span>` +
+        (a.detail ? `<span class="d">${escapeHtml(a.detail)}</span>` : "") +
+        `</li>`
+      ).join("");
+    }
+  }
+
+  document.getElementById("modal-star")?.classList.add("active");
+}
+
+function dismissStarCelebration() {
+  document.getElementById("modal-star")?.classList.remove("active");
+}
+
+function dismissStarBadgeOnly() {
+  clearStarQueue();
+}
+
+function bindStarBadgeGestures() {
+  const badge = document.getElementById("star-badge");
+  if (!badge || badge.dataset.bound) return;
+  badge.dataset.bound = "1";
+
+  badge.addEventListener("pointerdown", e => {
+    if (!starQueue.length) return;
+    e.preventDefault();
+    badge.setPointerCapture(e.pointerId);
+    starSwipe = {
+      id: e.pointerId,
+      x0: e.clientX,
+      y0: e.clientY,
+      moved: false
+    };
+    badge.classList.add("dragging");
+  });
+
+  badge.addEventListener("pointermove", e => {
+    if (!starSwipe || starSwipe.id !== e.pointerId) return;
+    const dx = e.clientX - starSwipe.x0;
+    const dy = e.clientY - starSwipe.y0;
+    if (Math.abs(dx) > 6 || Math.abs(dy) > 6) starSwipe.moved = true;
+    const fade = Math.min(1, Math.hypot(dx, dy) / 120);
+    badge.style.transform = `translate(${dx}px, ${dy}px) rotate(${dx * 0.12}deg)`;
+    badge.style.opacity = String(1 - fade * 0.65);
+  });
+
+  function endSwipe(e) {
+    if (!starSwipe || starSwipe.id !== e.pointerId) return;
+    const dx = e.clientX - starSwipe.x0;
+    const dy = e.clientY - starSwipe.y0;
+    const dist = Math.hypot(dx, dy);
+    const moved = starSwipe.moved;
+    starSwipe = null;
+    badge.classList.remove("dragging");
+    badge.style.transform = "";
+    badge.style.opacity = "";
+    try { badge.releasePointerCapture(e.pointerId); } catch (_) {}
+
+    if (dist > 72) {
+      dismissStarBadgeOnly();
+      return;
+    }
+    if (!moved) openStarCelebration();
+  }
+
+  badge.addEventListener("pointerup", endSwipe);
+  badge.addEventListener("pointercancel", () => {
+    starSwipe = null;
+    badge.classList.remove("dragging");
+    badge.style.transform = "";
+    badge.style.opacity = "";
+  });
+}
+
+function scoreLabel(strokes, par) {
+  if (par == null || strokes == null) return null;
+  const d = strokes - par;
+  if (d <= -3) return "Albatross";
+  if (d === -2) return "Eagle";
+  if (d === -1) return "Birdie";
+  if (d === 0) return "Par";
+  if (d === 1) return "Bogey";
+  return null;
+}
+
+function priorHoleScores(courseId, holeIndex, excludeRoundId) {
+  const out = [];
+  rounds.forEach(r => {
+    if (!r || r.courseId !== courseId) return;
+    if (excludeRoundId && r.id === excludeRoundId) return;
+    const h = r.holes?.[holeIndex];
+    if (!h?.shots?.length) return;
+    // Ignore unfinished holes mid-round unless they hole-out'd (have shots after tee)
+    out.push(h.shots.length);
+  });
+  return out;
+}
+
+function checkDriveRecord(distanceM) {
+  if (!currentCourse || !(distanceM > 0)) return;
+  const courseHole = ensureCourseHole(currentHoleIndex);
+  if (!courseHole) return;
+  const drives = courseHole.drives || [];
+  // Newest drive already pushed — compare against priors
+  const prior = drives.slice(0, -1).map(d => d.distanceM).filter(n => typeof n === "number" && n > 0);
+  if (!prior.length) return;
+  const prevBest = Math.max(...prior);
+  if (distanceM <= prevBest + 0.4) return;
+  const holeNum = (currentRound?.holes?.[currentHoleIndex]?.holeNumber) || (currentHoleIndex + 1);
+  enqueueStar({
+    eyebrow: "Longest drive",
+    title: "Best drive!",
+    headline: Math.round(distanceM) + " m",
+    detail: `Hole ${holeNum} · beat your ${Math.round(prevBest)} m`
+  });
+}
+
+function checkHoleScoreRecords() {
+  if (!currentRound || !currentCourse) return;
+  const hole = currentRound.holes[currentHoleIndex];
+  if (!hole?.shots?.length) return;
+  const strokes = hole.shots.length;
+  const par = hole.par;
+  const holeNum = hole.holeNumber || (currentHoleIndex + 1);
+  const label = scoreLabel(strokes, par);
+
+  if (label === "Birdie" || label === "Eagle" || label === "Albatross") {
+    enqueueStar({
+      eyebrow: "Under par",
+      title: label + "!",
+      headline: strokes + " · Par " + par,
+      detail: `Hole ${holeNum} — smash that card`
+    });
+  }
+
+  const priors = priorHoleScores(currentRound.courseId, currentHoleIndex, currentRound.id);
+  if (priors.length) {
+    const prevBest = Math.min(...priors);
+    if (strokes < prevBest) {
+      enqueueStar({
+        eyebrow: "Personal best",
+        title: "Lowest score!",
+        headline: String(strokes),
+        detail: `Hole ${holeNum} · was ${prevBest}`
+      });
+    }
+  }
+}
+
+function checkBestRoundRecord(round) {
+  if (!round || round.partial || !round.completed) return;
+  const total = round.holes.reduce((s, h) => s + (h.shots?.length || 0), 0);
+  if (!total) return;
+  const others = rounds.filter(r =>
+    r &&
+    r.courseId === round.courseId &&
+    r.id !== round.id &&
+    r.completed &&
+    !r.partial
+  );
+  const otherTotals = others.map(r =>
+    r.holes.reduce((s, h) => s + (h.shots?.length || 0), 0)
+  ).filter(t => t > 0);
+  if (!otherTotals.length) return;
+  const prevBest = Math.min(...otherTotals);
+  if (total >= prevBest) return;
+  const courseName = courses.find(c => c.id === round.courseId)?.name || "this course";
+  enqueueStar({
+    eyebrow: "Round record",
+    title: "Best round!",
+    headline: total + " strokes",
+    detail: `${courseName} · beat ${prevBest}`
+  });
+}
+
 function saveData() {
   try {
     localStorage.setItem("gst_courses", JSON.stringify(courses));
@@ -1197,6 +1596,7 @@ function closeModal() {
   document.querySelectorAll(".modal").forEach(m => {
     if (m.id === "modal-map") return;
     if (m.id === "modal-map-image-scope") return;
+    if (m.id === "modal-star") return;
     m.classList.remove("active");
   });
   pendingShotPosition = null;
@@ -1372,6 +1772,7 @@ function recordDrive(from, to) {
   });
   if (courseHole.drives.length > 30) courseHole.drives = courseHole.drives.slice(-30);
   saveData();
+  checkDriveRecord(distanceM);
 }
 
 function driveStabilityText(holeIndex, course) {
@@ -1928,6 +2329,8 @@ function holeOut() {
 
   tryRecordPinMark(currentPosition);
 
+  checkHoleScoreRecords();
+
   const missing = hole.shots.filter(s => !s.club);
   if (missing.length > 0) {
     if (confirm(`Assign clubs for hole ${hole.holeNumber}? (${missing.length} shot(s) without a club)`)) {
@@ -1970,6 +2373,7 @@ function saveRoundAndHome() {
     currentRound.partial = false;
     currentRound.completed = true;
     upsertRound(currentRound);
+    checkBestRoundRecord(currentRound);
   }
   currentRound = null;
   stopAutoMarkWatch();
@@ -2072,6 +2476,11 @@ function closeTopModal() {
   const hist = document.getElementById("modal-hole-history");
   if (hist?.classList.contains("active")) {
     hist.classList.remove("active");
+    return true;
+  }
+  const star = document.getElementById("modal-star");
+  if (star?.classList.contains("active")) {
+    dismissStarCelebration();
     return true;
   }
   const map = document.getElementById("modal-map");
@@ -3116,6 +3525,23 @@ function getActiveMapXform() {
   return isMapLocked() ? getMapView() : getMapAlign();
 }
 
+/**
+ * Zoom xform so the canvas point (focusX, focusY) stays under the fingers/cursor.
+ * Transform model: screen = R(scale * (p - center)) + center + offset
+ */
+function zoomMapXformAt(xform, factor, focusX, focusY, cssW, cssH) {
+  if (!xform || !(factor > 0)) return;
+  const oldS = xform.scale || 1;
+  const newS = Math.min(8, Math.max(0.2, oldS * factor));
+  if (Math.abs(newS - oldS) < 1e-6) return;
+  const ratio = newS / oldS;
+  const cx = cssW / 2;
+  const cy = cssH / 2;
+  xform.offsetX = (1 - ratio) * (focusX - cx) + ratio * (xform.offsetX || 0);
+  xform.offsetY = (1 - ratio) * (focusY - cy) + ratio * (xform.offsetY || 0);
+  xform.scale = newS;
+}
+
 function holeHasGpsCalib(holeIndex) {
   if (!mapSession) return false;
   const h = ensureCourseHole(holeIndex, mapSession.course);
@@ -3919,6 +4345,10 @@ function bindMapGestures() {
     if (mapPointers.size === 2) {
       const pts = [...mapPointers.values()];
       mapLastPinchDist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+      mapLastPinchMid = {
+        x: (pts[0].x + pts[1].x) / 2,
+        y: (pts[0].y + pts[1].y) / 2
+      };
     }
   });
 
@@ -3944,11 +4374,26 @@ function bindMapGestures() {
     } else if (mapPointers.size === 2) {
       const pts = [...mapPointers.values()];
       const dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
-      if (mapLastPinchDist && dist > 0) {
-        xform.scale = Math.min(8, Math.max(0.2, xform.scale * (dist / mapLastPinchDist)));
+      const mid = {
+        x: (pts[0].x + pts[1].x) / 2,
+        y: (pts[0].y + pts[1].y) / 2
+      };
+      if (mapLastPinchDist && dist > 0 && mapLastPinchMid) {
+        const wrap = document.getElementById("map-canvas-wrap");
+        const cssW = wrap?.clientWidth || canvas.clientWidth || 320;
+        const cssH = Math.max(wrap?.clientHeight || canvas.clientHeight || 0, 240);
+        const rect = canvas.getBoundingClientRect();
+        // Zoom about previous finger midpoint so content under the pinch stays put
+        const focusX = mapLastPinchMid.x - rect.left;
+        const focusY = mapLastPinchMid.y - rect.top;
+        zoomMapXformAt(xform, dist / mapLastPinchDist, focusX, focusY, cssW, cssH);
+        // Then slide with the moving midpoint (two-finger pan)
+        xform.offsetX += mid.x - mapLastPinchMid.x;
+        xform.offsetY += mid.y - mapLastPinchMid.y;
         drawHoleMap();
       }
       mapLastPinchDist = dist;
+      mapLastPinchMid = mid;
     }
   });
 
@@ -3961,7 +4406,10 @@ function bindMapGestures() {
       return;
     }
     mapPointers.delete(e.pointerId);
-    if (mapPointers.size < 2) mapLastPinchDist = null;
+    if (mapPointers.size < 2) {
+      mapLastPinchDist = null;
+      mapLastPinchMid = null;
+    }
     if (mapPointers.size === 0) {
       canvas.classList.remove("dragging");
       persistMapAlign();
@@ -3975,7 +4423,11 @@ function bindMapGestures() {
     e.preventDefault();
     const xform = getActiveMapXform();
     const factor = e.deltaY < 0 ? 1.08 : 1 / 1.08;
-    xform.scale = Math.min(8, Math.max(0.2, xform.scale * factor));
+    const pos = canvasPos(e);
+    const wrap = document.getElementById("map-canvas-wrap");
+    const cssW = wrap?.clientWidth || canvas.clientWidth || 320;
+    const cssH = Math.max(wrap?.clientHeight || canvas.clientHeight || 0, 240);
+    zoomMapXformAt(xform, factor, pos.x, pos.y, cssW, cssH);
     persistMapAlign();
     drawHoleMap();
   }, { passive: false });
@@ -4725,6 +5177,7 @@ function runSplash() {
 
 applyTheme();
 armBackTrap();
+bindStarBadgeGestures();
 renderHome();
 runSplash();
 </script>
