@@ -535,6 +535,7 @@
       <div class="splash-ball" aria-hidden="true"></div>
       <div class="splash-title">Shot <span>Tracker</span></div>
       <div class="splash-tag">Fore!</div>
+      <div class="splash-version" id="splash-version"></div>
     </div>
   </div>
 
@@ -911,6 +912,7 @@
   </div>
 
 <script>
+const APP_VERSION = "1.3.0";
 const CLUBS = ["Dr","3w","5w","Hybrid","3i","4i","5i","6i","7i","8i","9i","PW","GW","SW","LW","Putter"];
 const PIN_ACCEPT_M = 10;
 const PIN_LOCK_M = 5;
@@ -4159,6 +4161,8 @@ function dismissSplash(fromTap) {
 }
 
 function runSplash() {
+  const ver = document.getElementById("splash-version");
+  if (ver) ver.textContent = "v" + APP_VERSION;
   playSplashJingle();
   // If autoplay was blocked, first tap unlocks audio (splash click also dismisses)
   const unlock = () => {
