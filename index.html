@@ -576,7 +576,10 @@
     </div>
 
     <div class="card">
-      <h3 style="margin-bottom:12px">Recent Rounds</h3>
+      <h3 class="recent-rounds-heading" style="margin-bottom:12px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:8px" onclick="showScreen('rounds')" role="button" tabindex="0">
+        <span>Recent Rounds</span>
+        <span style="font-size:13px;font-weight:500;color:var(--muted)">All →</span>
+      </h3>
       <div id="recent-rounds"></div>
     </div>
 
@@ -601,6 +604,16 @@
         style="width:min(220px,70vw);height:auto;border-radius:12px;background:#fff;padding:10px"
       >
     </div>
+  </div>
+
+  <!-- ALL ROUNDS -->
+  <div id="screen-rounds" class="screen">
+    <div class="header">
+      <button class="btn-secondary" onclick="showScreen('home')">← Back</button>
+      <h2>All Rounds</h2>
+      <div style="width:60px"></div>
+    </div>
+    <div id="all-rounds-list"></div>
   </div>
 
   <!-- SETTINGS -->
@@ -927,7 +940,7 @@
   </div>
 
 <script>
-const APP_VERSION = "1.3.1";
+const APP_VERSION = "1.3.2";
 const CLUBS = ["Dr","3w","5w","Hybrid","3i","4i","5i","6i","7i","8i","9i","PW","GW","SW","LW","Putter"];
 const PIN_ACCEPT_M = 10;
 const PIN_LOCK_M = 5;
@@ -1092,6 +1105,7 @@ function showScreen(id) {
   document.getElementById("screen-" + id).classList.add("active");
   if (id === "home") renderHome();
   if (id === "courses") renderCourses();
+  if (id === "rounds") renderAllRounds();
   if (id === "settings") renderSettings();
   if (id === "create-course") {
     document.getElementById("course-name").value = "";
@@ -1322,6 +1336,37 @@ function renderPhoneSetup() {
 }
 
 // ---------- Home ----------
+function roundListRowHtml(r, { manage } = {}) {
+  const course = courses.find(c => c.id === r.courseId);
+  const totalShots = r.holes.reduce((sum, h) => sum + h.shots.length, 0);
+  const game = gameNumberForRound(r);
+  const gameBit = game ? ` · Game ${game.n}` : "";
+  const partial = isPartialRound(r);
+  let actions = "";
+  if (manage) {
+    actions = `<div style="display:flex;gap:6px;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end">
+      <button class="btn-secondary" style="padding:8px 10px;font-size:13px" onclick="reviewRound('${r.id}')">View</button>
+      ${partial ? `<button class="btn-primary" style="padding:8px 10px;font-size:13px" onclick="resumePartialRound('${r.id}')">Continue</button>` : ""}
+      <button class="btn-danger" style="padding:8px 10px;font-size:13px" onclick="deleteRound('${r.id}')">Delete</button>
+    </div>`;
+  } else if (partial) {
+    actions = `<div style="display:flex;gap:6px;flex-shrink:0">
+      <button class="btn-secondary" style="padding:8px 10px;font-size:13px" onclick="reviewRound('${r.id}')">View</button>
+      <button class="btn-primary" style="padding:8px 10px;font-size:13px" onclick="resumePartialRound('${r.id}')">Continue</button>
+    </div>`;
+  } else {
+    actions = `<button class="btn-secondary" style="padding:8px 12px;font-size:13px" onclick="reviewRound('${r.id}')">View</button>`;
+  }
+  return `
+    <div style="padding:12px 0;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;gap:10px">
+      <div style="min-width:0">
+        <div style="font-weight:600">${course ? escapeHtml(course.name) : "Unknown"}</div>
+        <div style="font-size:13px;color:var(--muted)">${new Date(r.date).toLocaleDateString()} · ${totalShots} shots${gameBit}${partial ? " · partial" : ""}</div>
+      </div>
+      ${actions}
+    </div>`;
+}
+
 function renderHome() {
   renderPhoneSetup();
   const el = document.getElementById("recent-rounds");
@@ -1329,28 +1374,36 @@ function renderHome() {
     el.innerHTML = `<div class="empty">No rounds yet</div>`;
     return;
   }
-  const recent = [...rounds].reverse().slice(0, 5);
-  el.innerHTML = recent.map(r => {
-    const course = courses.find(c => c.id === r.courseId);
-    const totalShots = r.holes.reduce((sum, h) => sum + h.shots.length, 0);
-    const game = gameNumberForRound(r);
-    const gameBit = game ? ` · Game ${game.n}` : "";
-    const partial = isPartialRound(r);
-    const actions = partial
-      ? `<div style="display:flex;gap:6px;flex-shrink:0">
-          <button class="btn-secondary" style="padding:8px 10px;font-size:13px" onclick="reviewRound('${r.id}')">View</button>
-          <button class="btn-primary" style="padding:8px 10px;font-size:13px" onclick="resumePartialRound('${r.id}')">Continue</button>
-        </div>`
-      : `<button class="btn-secondary" style="padding:8px 12px;font-size:13px" onclick="reviewRound('${r.id}')">View</button>`;
-    return `
-      <div style="padding:12px 0;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;gap:10px">
-        <div style="min-width:0">
-          <div style="font-weight:600">${course ? escapeHtml(course.name) : "Unknown"}</div>
-          <div style="font-size:13px;color:var(--muted)">${new Date(r.date).toLocaleDateString()} · ${totalShots} shots${gameBit}${partial ? " · partial" : ""}</div>
-        </div>
-        ${actions}
-      </div>`;
-  }).join("");
+  const recent = [...rounds].reverse().slice(0, 4);
+  el.innerHTML = recent.map(r => roundListRowHtml(r)).join("");
+}
+
+function renderAllRounds() {
+  const el = document.getElementById("all-rounds-list");
+  if (!el) return;
+  if (rounds.length === 0) {
+    el.innerHTML = `<div class="card"><div class="empty">No rounds yet</div></div>`;
+    return;
+  }
+  const list = [...rounds].reverse();
+  el.innerHTML = `<div class="card">${list.map(r => roundListRowHtml(r, { manage: true })).join("")}</div>
+    <p class="modal-note" style="padding:0 4px">Tap View to open a round. Delete removes it from this device.</p>`;
+}
+
+function deleteRound(id) {
+  const round = rounds.find(r => r.id === id);
+  if (!round) return;
+  const course = courses.find(c => c.id === round.courseId);
+  const label = course ? course.name : "this round";
+  const game = gameNumberForRound(round);
+  const gameBit = game ? ` (Game ${game.n})` : "";
+  if (!confirm(`Delete ${label}${gameBit}?`)) return;
+  rounds = rounds.filter(r => r.id !== id);
+  saveData();
+  if (window._reviewRoundId === id) window._reviewRoundId = null;
+  renderAllRounds();
+  if (document.getElementById("screen-home")?.classList.contains("active")) renderHome();
+  showToast("Round deleted");
 }
 
 function escapeHtml(str) {
@@ -1935,6 +1988,11 @@ function onHardwareBack() {
 
   if (screen === "create-course") {
     showScreen("courses");
+    return;
+  }
+
+  if (screen === "rounds") {
+    showScreen("home");
     return;
   }
 
