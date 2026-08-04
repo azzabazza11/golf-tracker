@@ -590,20 +590,6 @@
     <div class="card">
       <button class="btn-secondary" style="width:100%" onclick="showScreen('settings')">Settings</button>
     </div>
-
-    <div class="card" style="text-align:center">
-      <h3 style="margin-bottom:8px">Open on phone</h3>
-      <p style="font-size:13px;color:var(--muted);margin-bottom:12px;line-height:1.4">
-        Scan to open this app (works best from the hosted HTTPS link).
-      </p>
-      <img
-        src="golf-tracker-qr.png"
-        alt="QR code for Golf Shot Tracker"
-        width="220"
-        height="220"
-        style="width:min(220px,70vw);height:auto;border-radius:12px;background:#fff;padding:10px"
-      >
-    </div>
   </div>
 
   <!-- ALL ROUNDS -->
@@ -664,6 +650,43 @@
           <input type="checkbox" id="setting-mark-sound" onchange="onMarkSoundToggle(this.checked)">
           <span class="slider"></span>
         </label>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-bottom:8px">Share</h3>
+      <p class="modal-note" style="margin-bottom:12px">Show the QR for the live GitHub Pages app (keeps your data on this device).</p>
+      <button type="button" class="btn-primary" style="width:100%" onclick="openShareQrModal()">Share QR</button>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-bottom:8px">Open older version</h3>
+      <p class="modal-note" style="margin-bottom:10px">
+        Only versions that share this app’s data format (schema <span id="settings-schema-label">1</span>). Same site, so courses/rounds stay.
+      </p>
+      <div class="label">Compatible versions</div>
+      <select id="setting-old-version" style="margin-bottom:10px"></select>
+      <button type="button" class="btn-secondary" style="width:100%" onclick="openSelectedOldVersion()">Open selected version</button>
+      <p class="modal-note" style="margin-top:10px">Current: v<span id="settings-current-version"></span></p>
+    </div>
+  </div>
+
+  <!-- MODAL: Share QR -->
+  <div id="modal-share-qr" class="modal">
+    <div class="modal-content" style="text-align:center">
+      <h3 style="margin-bottom:8px">Share Shot Tracker</h3>
+      <p class="modal-note" style="margin-bottom:12px" id="share-qr-url-label"></p>
+      <img
+        id="share-qr-img"
+        src="golf-tracker-qr.png"
+        alt="QR code for Golf Shot Tracker"
+        width="240"
+        height="240"
+        style="width:min(240px,70vw);height:auto;border-radius:12px;background:#fff;padding:10px"
+      >
+      <div class="row" style="margin-top:16px">
+        <button type="button" class="btn-secondary" onclick="closeModal()">Close</button>
+        <button type="button" class="btn-primary" onclick="shareAppLink()">Share link</button>
       </div>
     </div>
   </div>
@@ -940,7 +963,20 @@
   </div>
 
 <script>
-const APP_VERSION = "1.3.3";
+const APP_VERSION = "1.3.4";
+/** Bump when localStorage shape breaks older builds. */
+const STORAGE_SCHEMA = 1;
+const PAGES_URL = "https://azzabazza11.github.io/golf-tracker/";
+/**
+ * Older builds hosted under /archive/{version}/ on the same origin (compatible list only).
+ * Add a new archive folder when shipping a release you want to keep openable.
+ */
+const VERSION_HISTORY = [
+  { version: "1.3.3", schema: 1, label: "Map setup without GPS first" },
+  { version: "1.3.2", schema: 1, label: "All rounds management" },
+  { version: "1.3.1", schema: 1, label: "Walk track on map toolbar" },
+  { version: "1.3.0", schema: 1, label: "Splash version label" }
+];
 const CLUBS = ["Dr","3w","5w","Hybrid","3i","4i","5i","6i","7i","8i","9i","PW","GW","SW","LW","Putter"];
 const PIN_ACCEPT_M = 10;
 const PIN_LOCK_M = 5;
@@ -1933,6 +1969,11 @@ function closeTopModal() {
   const exitM = document.getElementById("modal-exit-round");
   if (exitM?.classList.contains("active")) {
     exitM.classList.remove("active");
+    return true;
+  }
+  const shareQr = document.getElementById("modal-share-qr");
+  if (shareQr?.classList.contains("active")) {
+    shareQr.classList.remove("active");
     return true;
   }
   const hist = document.getElementById("modal-hole-history");
@@ -3619,6 +3660,87 @@ function renderSettings() {
   }
   const row = document.getElementById("setting-sound-row");
   if (row) row.style.opacity = settings.autoMark ? "1" : "0.45";
+
+  const cur = document.getElementById("settings-current-version");
+  if (cur) cur.textContent = APP_VERSION;
+  const sch = document.getElementById("settings-schema-label");
+  if (sch) sch.textContent = String(STORAGE_SCHEMA);
+  populateOldVersionSelect();
+}
+
+function compatibleVersions() {
+  return VERSION_HISTORY.filter(v =>
+    v.schema === STORAGE_SCHEMA && v.version !== APP_VERSION
+  );
+}
+
+function populateOldVersionSelect() {
+  const sel = document.getElementById("setting-old-version");
+  if (!sel) return;
+  const list = compatibleVersions();
+  if (!list.length) {
+    sel.innerHTML = `<option value="">No older compatible versions</option>`;
+    sel.disabled = true;
+    return;
+  }
+  sel.disabled = false;
+  sel.innerHTML = list.map(v =>
+    `<option value="${escapeHtml(v.version)}">v${escapeHtml(v.version)} — ${escapeHtml(v.label || "")}</option>`
+  ).join("");
+}
+
+function openSelectedOldVersion() {
+  const sel = document.getElementById("setting-old-version");
+  const ver = sel && sel.value;
+  if (!ver) {
+    showToast("No version selected");
+    return;
+  }
+  const entry = VERSION_HISTORY.find(v => v.version === ver);
+  if (!entry || entry.schema !== STORAGE_SCHEMA) {
+    showToast("That version is not compatible with current data");
+    return;
+  }
+  const path = `archive/${encodeURIComponent(ver)}/index.html`;
+  if (!confirm(`Open v${ver}?\n\nUses the same saved courses/rounds on this device.`)) return;
+  location.href = path;
+}
+
+function appShareUrl() {
+  try {
+    if (location.protocol === "http:" || location.protocol === "https:") {
+      // Prefer clean Pages URL when on github.io; else current origin+path
+      if (/github\.io$/i.test(location.hostname)) {
+        return location.origin + location.pathname.replace(/archive\/[^/]+\/index\.html$/i, "").replace(/index\.html$/i, "");
+      }
+      return location.href.split("#")[0].replace(/archive\/[^/]+\/index\.html$/i, "index.html");
+    }
+  } catch (e) { /* ignore */ }
+  return PAGES_URL;
+}
+
+function openShareQrModal() {
+  const label = document.getElementById("share-qr-url-label");
+  if (label) label.textContent = appShareUrl();
+  document.getElementById("modal-share-qr").classList.add("active");
+}
+
+async function shareAppLink() {
+  const url = appShareUrl();
+  try {
+    if (navigator.share) {
+      await navigator.share({ title: "Golf Shot Tracker", text: "Open Shot Tracker", url });
+      return;
+    }
+  } catch (e) {
+    if (e && e.name === "AbortError") return;
+  }
+  try {
+    await navigator.clipboard.writeText(url);
+    showToast("Link copied");
+  } catch (e) {
+    showToast(url);
+  }
 }
 
 function onLightModeToggle(on) {

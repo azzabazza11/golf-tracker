@@ -590,6 +590,20 @@
     <div class="card">
       <button class="btn-secondary" style="width:100%" onclick="showScreen('settings')">Settings</button>
     </div>
+
+    <div class="card" style="text-align:center">
+      <h3 style="margin-bottom:8px">Open on phone</h3>
+      <p style="font-size:13px;color:var(--muted);margin-bottom:12px;line-height:1.4">
+        Scan to open this app (works best from the hosted HTTPS link).
+      </p>
+      <img
+        src="golf-tracker-qr.png"
+        alt="QR code for Golf Shot Tracker"
+        width="220"
+        height="220"
+        style="width:min(220px,70vw);height:auto;border-radius:12px;background:#fff;padding:10px"
+      >
+    </div>
   </div>
 
   <!-- ALL ROUNDS -->
@@ -650,43 +664,6 @@
           <input type="checkbox" id="setting-mark-sound" onchange="onMarkSoundToggle(this.checked)">
           <span class="slider"></span>
         </label>
-      </div>
-    </div>
-
-    <div class="card">
-      <h3 style="margin-bottom:8px">Share</h3>
-      <p class="modal-note" style="margin-bottom:12px">Show the QR for the live GitHub Pages app (keeps your data on this device).</p>
-      <button type="button" class="btn-primary" style="width:100%" onclick="openShareQrModal()">Share QR</button>
-    </div>
-
-    <div class="card">
-      <h3 style="margin-bottom:8px">Open older version</h3>
-      <p class="modal-note" style="margin-bottom:10px">
-        Only versions that share this app’s data format (schema <span id="settings-schema-label">1</span>). Same site, so courses/rounds stay.
-      </p>
-      <div class="label">Compatible versions</div>
-      <select id="setting-old-version" style="margin-bottom:10px"></select>
-      <button type="button" class="btn-secondary" style="width:100%" onclick="openSelectedOldVersion()">Open selected version</button>
-      <p class="modal-note" style="margin-top:10px">Current: v<span id="settings-current-version"></span></p>
-    </div>
-  </div>
-
-  <!-- MODAL: Share QR -->
-  <div id="modal-share-qr" class="modal">
-    <div class="modal-content" style="text-align:center">
-      <h3 style="margin-bottom:8px">Share Shot Tracker</h3>
-      <p class="modal-note" style="margin-bottom:12px" id="share-qr-url-label"></p>
-      <img
-        id="share-qr-img"
-        src="golf-tracker-qr.png"
-        alt="QR code for Golf Shot Tracker"
-        width="240"
-        height="240"
-        style="width:min(240px,70vw);height:auto;border-radius:12px;background:#fff;padding:10px"
-      >
-      <div class="row" style="margin-top:16px">
-        <button type="button" class="btn-secondary" onclick="closeModal()">Close</button>
-        <button type="button" class="btn-primary" onclick="shareAppLink()">Share link</button>
       </div>
     </div>
   </div>
@@ -963,20 +940,7 @@
   </div>
 
 <script>
-const APP_VERSION = "1.3.4";
-/** Bump when localStorage shape breaks older builds. */
-const STORAGE_SCHEMA = 1;
-const PAGES_URL = "https://azzabazza11.github.io/golf-tracker/";
-/**
- * Older builds hosted under /archive/{version}/ on the same origin (compatible list only).
- * Add a new archive folder when shipping a release you want to keep openable.
- */
-const VERSION_HISTORY = [
-  { version: "1.3.3", schema: 1, label: "Map setup without GPS first" },
-  { version: "1.3.2", schema: 1, label: "All rounds management" },
-  { version: "1.3.1", schema: 1, label: "Walk track on map toolbar" },
-  { version: "1.3.0", schema: 1, label: "Splash version label" }
-];
+const APP_VERSION = "1.3.2";
 const CLUBS = ["Dr","3w","5w","Hybrid","3i","4i","5i","6i","7i","8i","9i","PW","GW","SW","LW","Putter"];
 const PIN_ACCEPT_M = 10;
 const PIN_LOCK_M = 5;
@@ -1971,11 +1935,6 @@ function closeTopModal() {
     exitM.classList.remove("active");
     return true;
   }
-  const shareQr = document.getElementById("modal-share-qr");
-  if (shareQr?.classList.contains("active")) {
-    shareQr.classList.remove("active");
-    return true;
-  }
   const hist = document.getElementById("modal-hole-history");
   if (hist?.classList.contains("active")) {
     hist.classList.remove("active");
@@ -2942,16 +2901,11 @@ function updateMapStatusLine() {
       ? "Hole photo"
       : "No photo";
   if (calib && calib.tee && calib.pin) {
-    const hole = mapSession.roundHole;
-    if (hole?.teePosition && h.pin) {
-      el.textContent = `${photoBit} · calibrated (Set tee/pin or Manual align to refine)`;
-    } else {
-      el.textContent = `${photoBit} · photo tee/pin set — Tee Off & Hole Out later to finish GPS align`;
-    }
+    el.textContent = `${photoBit} · calibrated (Set tee/pin or Manual align to refine)`;
   } else if (!mapImage) {
-    el.textContent = "Add Image, then Set tee & Set pin on the photo (GPS not required yet).";
+    el.textContent = "Add Image, then Set tee & Set pin on the photo to place shots.";
   } else {
-    el.textContent = `${photoBit} · Set tee & Set pin on the photo (can do before Tee Off)`;
+    el.textContent = `${photoBit} · Set tee & Set pin on the photo to calibrate`;
   }
 }
 
@@ -3096,18 +3050,26 @@ function startMapTapMode(kind) {
     showToast("Add an Image first");
     return;
   }
-  // Photo taps can be set before GPS — alignment completes once tee GPS + pin GPS exist
+  const hole = mapSession.roundHole;
+  const courseHole = ensureCourseHole(mapSession.holeIndex, mapSession.course);
+  if (!hole.teePosition) {
+    showToast("Need a GPS tee — Tee Off on this hole first");
+    return;
+  }
+  if (!courseHole || !courseHole.pin) {
+    showToast("Need a GPS pin — Hole Out at the cup to mark it first");
+    return;
+  }
   mapManualAlign = false;
   mapTapMode = kind;
   updateMapLockUI();
 }
 
 function handleMapCalibTap(sx, sy) {
-  if (!mapTapMode || !mapSession) return false;
+  if (!mapTapMode || !mapSession || !mapFit) return false;
   const wrap = document.getElementById("map-canvas-wrap");
   const cssW = wrap.clientWidth;
   const cssH = Math.max(wrap.clientHeight, 240);
-  if (!mapFit) mapFit = computeMapFit([], cssW, cssH);
   const view = getMapView();
   const fitPt = screenToFit(sx, sy, view, cssW, cssH);
   const align = getMapAlign();
@@ -3128,27 +3090,15 @@ function handleMapCalibTap(sx, sy) {
       persistMapAlign();
       showToast("Calibrated — shots mapped to tee & pin");
     } else {
-      persistMapAlign();
-      showToast("Photo tee & pin saved — Tee Off / Hole Out later to finish GPS align");
+      showToast("Could not calibrate — try tapping again");
     }
   } else {
     persistMapAlign();
-    showToast(kind === "tee" ? "Tee marked on photo — now Set pin" : "Pin marked on photo — now Set tee");
+    showToast(kind === "tee" ? "Tee set — now Set pin" : "Pin set — now Set tee");
   }
   updateMapLockUI();
   drawHoleMap();
   return true;
-}
-
-function photoLocalToCanvas(local, align, cssW, cssH) {
-  if (!local) return null;
-  const s = align.scale || 1;
-  let x = local.x * s;
-  let y = local.y * s;
-  const r = (align.rotation || 0) * Math.PI / 180;
-  const xr = x * Math.cos(r) - y * Math.sin(r);
-  const yr = x * Math.sin(r) + y * Math.cos(r);
-  return { x: xr + cssW / 2 + (align.offsetX || 0), y: yr + cssH / 2 + (align.offsetY || 0) };
 }
 
 function resizeMapCanvas() {
@@ -3222,51 +3172,10 @@ function drawHoleMap() {
   mapGeoOrigin = origin || null;
   const youLeg = document.getElementById("map-leg-you");
   if (youLeg) youLeg.style.display = youPos ? "" : "none";
-
-  // Setup / no GPS yet: still show photo and allow Set tee / Set pin markers
   if (!origin) {
-    mapFit = computeMapFit([], cssW, cssH);
-    const align = getMapAlign();
-    const view = getMapView();
-    ctx.save();
-    ctx.translate(cssW / 2 + view.offsetX, cssH / 2 + view.offsetY);
-    ctx.rotate(view.rotation * Math.PI / 180);
-    ctx.scale(view.scale, view.scale);
-    ctx.translate(-cssW / 2, -cssH / 2);
-    if (mapImage) {
-      ctx.save();
-      ctx.translate(cssW / 2 + align.offsetX, cssH / 2 + align.offsetY);
-      ctx.rotate(align.rotation * Math.PI / 180);
-      ctx.scale(align.scale, align.scale);
-      const iw = mapImage.naturalWidth;
-      const ih = mapImage.naturalHeight;
-      const cover = Math.max(cssW / iw, cssH / ih);
-      ctx.globalAlpha = 0.92;
-      ctx.drawImage(mapImage, -iw * cover / 2, -ih * cover / 2, iw * cover, ih * cover);
-      ctx.restore();
-    } else {
-      ctx.fillStyle = "#1a2332";
-      ctx.fillRect(0, 0, cssW, cssH);
-      ctx.fillStyle = "#95a5a6";
-      ctx.font = "13px sans-serif";
-      ctx.fillText("Add a course photo, then Set tee & Set pin on the image", 16, 28);
-    }
-    const calib = courseHole && courseHole.photoCalib;
-    function drawCalibLocal(local, color) {
-      const p = photoLocalToCanvas(local, align, cssW, cssH);
-      if (!p) return;
-      const rr = 9 / Math.max(view.scale, 0.01);
-      ctx.beginPath();
-      ctx.fillStyle = color;
-      ctx.strokeStyle = "rgba(0,0,0,0.55)";
-      ctx.lineWidth = 2 / Math.max(view.scale, 0.01);
-      ctx.arc(p.x, p.y, rr, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.stroke();
-    }
-    if (calib?.tee) drawCalibLocal(calib.tee, "#ffffff");
-    if (calib?.pin) drawCalibLocal(calib.pin, "#2ecc71");
-    ctx.restore();
+    ctx.fillStyle = "#95a5a6";
+    ctx.font = "14px sans-serif";
+    ctx.fillText("No GPS points yet", 20, 40);
     return;
   }
 
@@ -3660,87 +3569,6 @@ function renderSettings() {
   }
   const row = document.getElementById("setting-sound-row");
   if (row) row.style.opacity = settings.autoMark ? "1" : "0.45";
-
-  const cur = document.getElementById("settings-current-version");
-  if (cur) cur.textContent = APP_VERSION;
-  const sch = document.getElementById("settings-schema-label");
-  if (sch) sch.textContent = String(STORAGE_SCHEMA);
-  populateOldVersionSelect();
-}
-
-function compatibleVersions() {
-  return VERSION_HISTORY.filter(v =>
-    v.schema === STORAGE_SCHEMA && v.version !== APP_VERSION
-  );
-}
-
-function populateOldVersionSelect() {
-  const sel = document.getElementById("setting-old-version");
-  if (!sel) return;
-  const list = compatibleVersions();
-  if (!list.length) {
-    sel.innerHTML = `<option value="">No older compatible versions</option>`;
-    sel.disabled = true;
-    return;
-  }
-  sel.disabled = false;
-  sel.innerHTML = list.map(v =>
-    `<option value="${escapeHtml(v.version)}">v${escapeHtml(v.version)} — ${escapeHtml(v.label || "")}</option>`
-  ).join("");
-}
-
-function openSelectedOldVersion() {
-  const sel = document.getElementById("setting-old-version");
-  const ver = sel && sel.value;
-  if (!ver) {
-    showToast("No version selected");
-    return;
-  }
-  const entry = VERSION_HISTORY.find(v => v.version === ver);
-  if (!entry || entry.schema !== STORAGE_SCHEMA) {
-    showToast("That version is not compatible with current data");
-    return;
-  }
-  const path = `archive/${encodeURIComponent(ver)}/index.html`;
-  if (!confirm(`Open v${ver}?\n\nUses the same saved courses/rounds on this device.`)) return;
-  location.href = path;
-}
-
-function appShareUrl() {
-  try {
-    if (location.protocol === "http:" || location.protocol === "https:") {
-      // Prefer clean Pages URL when on github.io; else current origin+path
-      if (/github\.io$/i.test(location.hostname)) {
-        return location.origin + location.pathname.replace(/archive\/[^/]+\/index\.html$/i, "").replace(/index\.html$/i, "");
-      }
-      return location.href.split("#")[0].replace(/archive\/[^/]+\/index\.html$/i, "index.html");
-    }
-  } catch (e) { /* ignore */ }
-  return PAGES_URL;
-}
-
-function openShareQrModal() {
-  const label = document.getElementById("share-qr-url-label");
-  if (label) label.textContent = appShareUrl();
-  document.getElementById("modal-share-qr").classList.add("active");
-}
-
-async function shareAppLink() {
-  const url = appShareUrl();
-  try {
-    if (navigator.share) {
-      await navigator.share({ title: "Golf Shot Tracker", text: "Open Shot Tracker", url });
-      return;
-    }
-  } catch (e) {
-    if (e && e.name === "AbortError") return;
-  }
-  try {
-    await navigator.clipboard.writeText(url);
-    showToast("Link copied");
-  } catch (e) {
-    showToast(url);
-  }
 }
 
 function onLightModeToggle(on) {
