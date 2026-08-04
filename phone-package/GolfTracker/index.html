@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
   <title>Golf Shot Tracker</title>
   <style>
-    :root {
+    :root, html[data-theme="dark"] {
       --bg: #0f1419;
       --card: #1a2332;
       --accent: #2ecc71;
@@ -14,6 +14,27 @@
       --muted: #95a5a6;
       --danger: #e74c3c;
       --warning: #f39c12;
+      --border: #2c3e50;
+      --input-bg: #0f1419;
+      --pill: #2c3e50;
+      --modal-scrim: rgba(0,0,0,0.75);
+      color-scheme: dark;
+    }
+
+    html[data-theme="light"] {
+      --bg: #eef2f5;
+      --card: #ffffff;
+      --accent: #1e9e57;
+      --accent-dim: #188a4a;
+      --text: #1a2332;
+      --muted: #5d6d7e;
+      --danger: #c0392b;
+      --warning: #d68910;
+      --border: #cfd8dc;
+      --input-bg: #f5f7fa;
+      --pill: #dfe6ea;
+      --modal-scrim: rgba(15,20,25,0.45);
+      color-scheme: light;
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -42,7 +63,7 @@
     button:disabled { opacity: 0.4; cursor: not-allowed; }
 
     .btn-primary { background: var(--accent); color: #000; }
-    .btn-secondary { background: var(--card); color: var(--text); border: 1px solid #2c3e50; }
+    .btn-secondary { background: var(--card); color: var(--text); border: 1px solid var(--border); }
     .btn-danger { background: var(--danger); color: white; }
     .btn-warning { background: var(--warning); color: #000; }
 
@@ -83,8 +104,8 @@
       width: 100%;
       padding: 12px 14px;
       border-radius: 10px;
-      border: 1px solid #2c3e50;
-      background: #0f1419;
+      border: 1px solid var(--border);
+      background: var(--input-bg);
       color: var(--text);
       font-size: 16px;
       margin-bottom: 12px;
@@ -100,7 +121,7 @@
       width: 42px;
       height: 42px;
       border-radius: 50%;
-      background: #2c3e50;
+      background: var(--pill);
       display: flex;
       align-items: center;
       justify-content: center;
@@ -109,12 +130,12 @@
       cursor: pointer;
     }
     .hole-pill.active { background: var(--accent); color: #000; }
-    .hole-pill.done { background: #1e8449; }
+    .hole-pill.done { background: #1e8449; color: #fff; }
 
     .shot-list { list-style: none; }
     .shot-list li {
       padding: 10px 0;
-      border-bottom: 1px solid #2c3e50;
+      border-bottom: 1px solid var(--border);
       display: flex;
       justify-content: space-between;
       align-items: center;
@@ -129,7 +150,7 @@
     .club-btn {
       padding: 12px 4px;
       font-size: 13px;
-      background: #2c3e50;
+      background: var(--pill);
       color: var(--text);
       border-radius: 10px;
     }
@@ -163,7 +184,7 @@
     .modal {
       position: fixed;
       inset: 0;
-      background: rgba(0,0,0,0.75);
+      background: var(--modal-scrim);
       display: none;
       align-items: flex-end;
       z-index: 100;
@@ -196,7 +217,7 @@
     }
     .toast.show { display: block; }
     .setup-banner {
-      background: #2c3e50;
+      background: var(--pill);
       border: 1px solid var(--warning);
       border-radius: 12px;
       padding: 14px;
@@ -242,7 +263,7 @@
       margin: 0;
       background: var(--card);
       color: var(--text);
-      border: 1px solid #2c3e50;
+      border: 1px solid var(--border);
       border-radius: 12px;
       font-weight: 600;
     }
@@ -291,6 +312,7 @@
     .map-legend .leg-tee::before { background: #fff; border: 1px solid #ccc; }
     .map-legend .leg-shot::before { background: #e67e22; }
     .map-legend .leg-pin::before { background: #2ecc71; }
+    .map-legend .leg-walk::before { background: #3498db; }
 
     .setting-row {
       display: flex;
@@ -298,7 +320,7 @@
       align-items: center;
       gap: 12px;
       padding: 14px 0;
-      border-bottom: 1px solid #2c3e50;
+      border-bottom: 1px solid var(--border);
     }
     .setting-row:last-child { border-bottom: none; }
     .setting-row .setting-text { flex: 1; }
@@ -314,7 +336,7 @@
     .switch .slider {
       position: absolute;
       inset: 0;
-      background: #2c3e50;
+      background: var(--pill);
       border-radius: 30px;
       cursor: pointer;
       transition: 0.2s;
@@ -451,6 +473,26 @@
     <div class="card">
       <div class="setting-row">
         <div class="setting-text">
+          <strong>Light mode</strong>
+          <span>Brighter screen for daytime. Off = dark mode.</span>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="setting-light-mode" onchange="onLightModeToggle(this.checked)">
+          <span class="slider"></span>
+        </label>
+      </div>
+      <div class="setting-row">
+        <div class="setting-text">
+          <strong>Show walking track</strong>
+          <span>Little blue dots on the hole map from your GPS path while playing.</span>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="setting-walk-track" onchange="onWalkTrackToggle(this.checked)">
+          <span class="slider"></span>
+        </label>
+      </div>
+      <div class="setting-row">
+        <div class="setting-text">
           <strong>Auto-mark shots</strong>
           <span>Trial: walk then stand still to mark. Assign clubs later. Needs motion permission.</span>
         </div>
@@ -501,6 +543,7 @@
 
       <div class="label">Number of Holes</div>
       <select id="course-holes">
+        <option value="3">3 holes</option>
         <option value="9">9 holes</option>
         <option value="18" selected>18 holes</option>
       </select>
@@ -681,6 +724,7 @@
         <span class="leg-tee">Tee</span>
         <span class="leg-shot">Shot</span>
         <span class="leg-pin">Green / pin</span>
+        <span class="leg-walk">Walk</span>
       </div>
       <p class="modal-note" id="map-status-line" style="margin-top:6px">Set tee &amp; pin on the photo to place shots. Drag orange marks to nudge.</p>
     </div>
@@ -733,10 +777,12 @@ function loadSettings() {
     const s = raw ? JSON.parse(raw) : {};
     return {
       autoMark: !!s.autoMark,
-      markSound: s.markSound !== false
+      markSound: s.markSound !== false,
+      showWalkTrack: s.showWalkTrack !== false,
+      theme: s.theme === "light" ? "light" : "dark"
     };
   } catch (e) {
-    return { autoMark: false, markSound: true };
+    return { autoMark: false, markSound: true, showWalkTrack: true, theme: "dark" };
   }
 }
 
@@ -749,6 +795,11 @@ function saveSettings() {
 }
 
 let settings = loadSettings();
+
+function applyTheme() {
+  const theme = settings.theme === "light" ? "light" : "dark";
+  document.documentElement.setAttribute("data-theme", theme);
+}
 
 let currentCourse = null;
 let currentRound  = null;
@@ -1083,10 +1134,10 @@ function renderHome() {
     const course = courses.find(c => c.id === r.courseId);
     const totalShots = r.holes.reduce((sum, h) => sum + h.shots.length, 0);
     return `
-      <div style="padding:12px 0;border-bottom:1px solid #2c3e50;display:flex;justify-content:space-between;align-items:center">
+      <div style="padding:12px 0;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
         <div>
           <div style="font-weight:600">${course ? escapeHtml(course.name) : "Unknown"}</div>
-          <div style="font-size:13px;color:var(--muted)">${new Date(r.date).toLocaleDateString()} · ${totalShots} shots</div>
+          <div style="font-size:13px;color:var(--muted)">${new Date(r.date).toLocaleDateString()} · ${totalShots} shots${r.partial ? " · partial" : ""}</div>
         </div>
         <button class="btn-secondary" style="padding:8px 12px;font-size:13px" onclick="reviewRound('${r.id}')">View</button>
       </div>`;
@@ -1206,7 +1257,8 @@ function startRound(courseId) {
       par: h.par,
       teePosition: null,
       nextClub: null,
-      shots: []
+      shots: [],
+      walkTrack: []
     }))
   };
   currentHoleIndex = 0;
@@ -1513,20 +1565,158 @@ function showSummary() {
 }
 
 function saveRoundAndHome() {
-  rounds.push(currentRound);
-  saveData();
+  if (currentRound) {
+    currentRound.partial = false;
+    currentRound.completed = true;
+    upsertRound(currentRound);
+  }
   currentRound = null;
+  stopAutoMarkWatch();
   stopGPS();
   showScreen("home");
 }
 
-function confirmExitRound() {
-  if (confirm("Exit without saving this round?")) {
-    stopAutoMarkWatch();
-    stopGPS();
-    currentRound = null;
-    showScreen("home");
+function roundHasProgress(round) {
+  if (!round?.holes) return false;
+  return round.holes.some(h =>
+    h.teePosition ||
+    (h.shots && h.shots.length > 0) ||
+    (h.walkTrack && h.walkTrack.length > 0)
+  );
+}
+
+function upsertRound(round) {
+  if (!round) return;
+  const i = rounds.findIndex(r => r.id === round.id);
+  if (i >= 0) rounds[i] = round;
+  else rounds.push(round);
+  saveData();
+}
+
+function exitRoundAndSave() {
+  stopAutoMarkWatch();
+  stopGPS();
+  if (currentRound && roundHasProgress(currentRound)) {
+    currentRound.partial = true;
+    currentRound.completed = false;
+    currentRound.endedAt = new Date().toISOString();
+    upsertRound(currentRound);
+    showToast("Round saved");
   }
+  currentRound = null;
+  showScreen("home");
+}
+
+function confirmExitRound() {
+  if (!currentRound) {
+    showScreen("home");
+    return;
+  }
+  if (!roundHasProgress(currentRound)) {
+    if (confirm("Leave this round? Nothing to save yet.")) {
+      stopAutoMarkWatch();
+      stopGPS();
+      currentRound = null;
+      showScreen("home");
+    }
+    return;
+  }
+  if (confirm("Save this round and exit?")) {
+    exitRoundAndSave();
+  }
+}
+
+// ---------- Phone / browser back ----------
+let backTrapArmed = true;
+let lastHomeBackAt = 0;
+
+function getActiveScreenId() {
+  const el = document.querySelector(".screen.active");
+  if (!el || !el.id.startsWith("screen-")) return "home";
+  return el.id.slice("screen-".length);
+}
+
+function closeTopModal() {
+  const scope = document.getElementById("modal-map-image-scope");
+  if (scope?.classList.contains("active")) {
+    cancelMapImageScope();
+    return true;
+  }
+  const map = document.getElementById("modal-map");
+  if (map?.classList.contains("active")) {
+    closeMapModal();
+    return true;
+  }
+  const edit = document.getElementById("modal-edit-club");
+  if (edit?.classList.contains("active")) {
+    document.getElementById("modal-edit-club").classList.remove("active");
+    if (window._pendingHoleAdvance) maybeFinishHoleClubAssign(true);
+    return true;
+  }
+  const open = [...document.querySelectorAll(".modal.active")].filter(m =>
+    m.id !== "modal-map" && m.id !== "modal-map-image-scope"
+  );
+  if (open.length) {
+    closeModal();
+    return true;
+  }
+  return false;
+}
+
+function onHardwareBack() {
+  if (closeTopModal()) return;
+
+  const screen = getActiveScreenId();
+
+  if (screen === "play" && currentRound) {
+    confirmExitRound();
+    return;
+  }
+
+  if (screen === "summary" && currentRound) {
+    if (confirm("Save this round?")) saveRoundAndHome();
+    else {
+      stopAutoMarkWatch();
+      stopGPS();
+      currentRound = null;
+      showScreen("home");
+    }
+    return;
+  }
+
+  if (screen === "create-course") {
+    showScreen("courses");
+    return;
+  }
+
+  if (screen !== "home") {
+    showScreen("home");
+    return;
+  }
+
+  const now = Date.now();
+  if (now - lastHomeBackAt < 2000) {
+    backTrapArmed = false;
+    history.go(-2);
+    return;
+  }
+  lastHomeBackAt = now;
+  showToast("Press back again to leave");
+}
+
+function onPopState() {
+  if (!backTrapArmed) return;
+  history.pushState({ gst: true }, "");
+  onHardwareBack();
+}
+
+function armBackTrap() {
+  backTrapArmed = true;
+  try {
+    history.replaceState({ gst: true }, "");
+    history.pushState({ gst: true }, "");
+  } catch (e) { /* ignore */ }
+  window.addEventListener("popstate", onPopState);
 }
 
 // ---------- GPS + mock ----------
@@ -1552,6 +1742,7 @@ function wantMockGps() {
 
 function applyMockPosition(pos) {
   currentPosition = pos;
+  recordWalkPoint(pos);
   const status = document.getElementById("gps-status");
   status.textContent = `Mock GPS (±${Math.round(pos.accuracy || 5)} m)`;
   status.className = "status warn";
@@ -1628,6 +1819,7 @@ function startGPS() {
 
       const { latitude, longitude, accuracy } = pos.coords;
       currentPosition = { lat: latitude, lon: longitude, accuracy };
+      recordWalkPoint(currentPosition);
       const status = document.getElementById("gps-status");
 
       if (accuracy > 25) {
@@ -2380,6 +2572,10 @@ function drawHoleMap() {
   shotM.forEach(p => meterPts.push(p));
   if (greenM) meterPts.push(greenM);
 
+  const walkRaw = settings.showWalkTrack ? (mapSession.roundHole.walkTrack || []) : [];
+  const walkM = walkRaw.map(p => latLonToMeters(origin, p));
+  walkM.forEach(p => meterPts.push(p));
+
   mapFit = computeMapFit(meterPts, cssW, cssH);
   applyPhotoCalibToAlign();
   const align = getMapAlign();
@@ -2422,6 +2618,17 @@ function drawHoleMap() {
     ctx.moveTo(path[0].x, path[0].y);
     for (let i = 1; i < path.length; i++) ctx.lineTo(path[i].x, path[i].y);
     ctx.stroke();
+  }
+
+  if (walkM.length) {
+    const r = 2.5 / Math.max(view.scale, 0.01);
+    ctx.fillStyle = "rgba(52, 152, 219, 0.9)";
+    walkM.forEach(m => {
+      const p = metersToCanvas(m, mapFit);
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+      ctx.fill();
+    });
   }
 
   function drawMarker(p, color, r, ring) {
@@ -2703,8 +2910,12 @@ function bindMapGestures() {
 
 // ---------- Settings + auto-mark + club edit ----------
 function renderSettings() {
+  const light = document.getElementById("setting-light-mode");
+  const walk = document.getElementById("setting-walk-track");
   const am = document.getElementById("setting-auto-mark");
   const snd = document.getElementById("setting-mark-sound");
+  if (light) light.checked = settings.theme === "light";
+  if (walk) walk.checked = !!settings.showWalkTrack;
   if (am) am.checked = !!settings.autoMark;
   if (snd) {
     snd.checked = !!settings.markSound;
@@ -2712,6 +2923,50 @@ function renderSettings() {
   }
   const row = document.getElementById("setting-sound-row");
   if (row) row.style.opacity = settings.autoMark ? "1" : "0.45";
+}
+
+function onLightModeToggle(on) {
+  settings.theme = on ? "light" : "dark";
+  saveSettings();
+  applyTheme();
+}
+
+function onWalkTrackToggle(on) {
+  settings.showWalkTrack = !!on;
+  saveSettings();
+  if (document.getElementById("modal-map")?.classList.contains("active")) {
+    drawHoleMap();
+  }
+  showToast(on ? "Walking track on" : "Walking track hidden");
+}
+
+const WALK_MIN_M = 4;
+const WALK_MAX_POINTS = 400;
+let walkMapRedrawAt = 0;
+
+function recordWalkPoint(pos) {
+  if (!currentRound || !pos || pos.lat == null || pos.lon == null) return;
+  const hole = currentRound.holes[currentHoleIndex];
+  if (!hole) return;
+  if (!hole.walkTrack) hole.walkTrack = [];
+  const last = hole.walkTrack[hole.walkTrack.length - 1];
+  if (last) {
+    const d = haversine(last.lat, last.lon, pos.lat, pos.lon);
+    if (d < WALK_MIN_M) return;
+  }
+  hole.walkTrack.push({ lat: pos.lat, lon: pos.lon, at: Date.now() });
+  if (hole.walkTrack.length > WALK_MAX_POINTS) {
+    hole.walkTrack = hole.walkTrack.filter((_, i) => i % 2 === 0).slice(-WALK_MAX_POINTS);
+  }
+
+  if (!settings.showWalkTrack) return;
+  const mapEl = document.getElementById("modal-map");
+  if (!mapEl?.classList.contains("active") || !mapSession) return;
+  if (mapSession.holeIndex !== currentHoleIndex) return;
+  const now = Date.now();
+  if (now - walkMapRedrawAt < 1000) return;
+  walkMapRedrawAt = now;
+  drawHoleMap();
 }
 
 async function onAutoMarkToggle(on) {
@@ -3192,6 +3447,8 @@ function runSplash() {
   setTimeout(() => dismissSplash(false), 1700);
 }
 
+applyTheme();
+armBackTrap();
 renderHome();
 runSplash();
 </script>
