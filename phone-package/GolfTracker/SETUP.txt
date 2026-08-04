@@ -1,0 +1,31 @@
+GOLF SHOT TRACKER — PHONE SETUP
+================================
+
+Chrome blocks GPS when you open index.html as a file.
+Do this ONCE at home, then bookmark — no laptop needed at the course.
+
+OPTION A — Local server app (recommended, works offline at course)
+------------------------------------------------------------------
+1. Install "Simple HTTP Server" from Play Store (or similar).
+2. This folder is already on your phone (Downloads/GolfTracker).
+3. In the app: pick this GolfTracker folder → Start server.
+4. Open Chrome → go to http://127.0.0.1:8080/  (use port the app shows).
+5. Menu → Add to Home screen / Bookmark.
+
+OPTION B — Free web host (needs mobile data at course)
+------------------------------------------------------
+1. At home, upload index.html to Netlify Drop or GitHub Pages.
+2. Open the https:// link on your phone in Chrome.
+3. Bookmark it. GPS works over HTTPS anywhere.
+
+USING THE APP
+-------------
+• Tee Off — pick your tee-shot club (saved with tee GPS).
+• Mark Shot — confirms distance, shows club used, pick club for NEXT shot.
+• Walk freely while picking clubs — position is locked at Mark Shot.
+
+• Tee Off — saves tee GPS for each hole (for future averages).
+• Mark Shot — locks distance/position; walk freely while picking a club.
+• Save Shot — uses the locked position, not where you are now.
+
+Data stays on your phone in Chrome storage.

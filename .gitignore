@@ -1,0 +1,14 @@
+# Local HTTPS certs (dev only — do not publish)
+.local-dev-cert.pem
+.local-dev-key.pem
+
+# Python
+__pycache__/
+*.py[cod]
+.Python
+
+# Editor / OS
+.DS_Store
+*.swp
+.idea/
+.vscode/
