@@ -1016,7 +1016,7 @@
   </div>
 
 <script>
-const APP_VERSION = "1.4.2";
+const APP_VERSION = "1.4.4";
 const PAGES_URL = "https://azzabazza11.github.io/golf-tracker/";
 const CLUBS = ["Dr","3w","5w","Hybrid","3i","4i","5i","6i","7i","8i","9i","PW","GW","SW","LW","Putter"];
 const PIN_ACCEPT_M = 10;
@@ -2897,10 +2897,11 @@ async function openMapSession(session) {
   updateMapWalkTrackButton();
   await ensureCourseDefaultPhoto(session.courseId, session.course.holes.length);
   await loadMapImageForSession();
-  applyCourseSharedMapXformIfNeeded();
+  applyMapHoleFraming({ animate: false });
   updateMapLockUI();
   requestAnimationFrame(() => {
     resizeMapCanvas();
+    applyMapHoleFraming({ animate: false });
     drawHoleMap();
     updateMapStatusLine();
   });
@@ -2933,6 +2934,7 @@ function updateMapHoleNavButtons() {
 
 async function mapStepHole(delta) {
   if (!mapSession) return;
+  if (mapXformAnimating) return;
   const round = getMapSessionRound();
   if (!round?.holes?.length) return;
 
@@ -2941,6 +2943,9 @@ async function mapStepHole(delta) {
     showToast(delta < 0 ? "First hole" : "Last hole");
     return;
   }
+
+  const fromAlign = copyMapXform(getMapAlign());
+  const fromView = copyMapXform(getMapView());
 
   persistMapAlign();
   mapSession.holeIndex = next;
@@ -2954,16 +2959,39 @@ async function mapStepHole(delta) {
   ensureCourseHole(next, mapSession.course);
   updateMapHoleNavButtons();
   await loadMapImageForSession();
-  applyCourseSharedMapXformIfNeeded();
+
+  // Keep previous camera as animation start
+  Object.assign(getMapAlign(), fromAlign);
+  Object.assign(getMapView(), fromView);
+
+  const target = computeMapHoleFramingTarget();
   updateMapLockUI();
-  requestAnimationFrame(() => {
-    resizeMapCanvas();
-    drawHoleMap();
-    updateMapStatusLine();
-  });
+  resizeMapCanvas();
+  updateMapStatusLine();
+
+  if (target) {
+    if (target.unlock) {
+      const h = ensureCourseHole(mapSession.holeIndex, mapSession.course);
+      h.mapLocked = false;
+      updateMapLockUI();
+    }
+    animateMapXform(fromAlign, fromView, target.align, target.view, 380);
+  } else {
+    applyCourseSharedMapXformIfNeeded();
+    const toAlign = copyMapXform(getMapAlign());
+    const toView = copyMapXform(getMapView());
+    Object.assign(getMapAlign(), fromAlign);
+    Object.assign(getMapView(), fromView);
+    if (mapXformNearlyEqual(fromAlign, toAlign) && mapXformNearlyEqual(fromView, toView)) {
+      drawHoleMap();
+    } else {
+      animateMapXform(fromAlign, fromView, toAlign, toView, 320);
+    }
+  }
 }
 
 function closeMapModal() {
+  cancelMapXformAnim();
   persistMapAlign();
   const returnScreen = mapSession && mapSession.returnScreen;
   document.getElementById("modal-map").classList.remove("active");
@@ -3112,8 +3140,163 @@ function applyCourseSharedMapXformIfNeeded() {
   if (!c?.sharedMapAlign) return;
   if (holeHasGpsCalib(mapSession.holeIndex)) return;
   const h = ensureCourseHole(mapSession.holeIndex, c);
+  // Holes with both photo tee+pin get a dedicated fit instead
+  if (h.photoCalib?.tee && h.photoCalib?.pin) return;
   h.mapAlign = { ...c.sharedMapAlign };
   if (c.sharedMapView) h.mapView = { ...c.sharedMapView };
+}
+
+/**
+ * Target framing for current hole: fit T/P if both set, else course shared xform.
+ */
+function computeMapHoleFramingTarget() {
+  if (!mapSession) return null;
+  const h = ensureCourseHole(mapSession.holeIndex, mapSession.course);
+  const calib = h && h.photoCalib;
+  if (calib?.tee && calib?.pin) {
+    const wrap = document.getElementById("map-canvas-wrap");
+    if (!wrap) return null;
+    const cssW = wrap.clientWidth || 320;
+    const cssH = Math.max(wrap.clientHeight, 240);
+    const pad = 64;
+    const Lt = calib.tee;
+    const Lp = calib.pin;
+    const mid = { x: (Lt.x + Lp.x) / 2, y: (Lt.y + Lp.y) / 2 };
+    const spanX = Math.max(Math.abs(Lp.x - Lt.x), 48);
+    const spanY = Math.max(Math.abs(Lp.y - Lt.y), 48);
+    let s = Math.min((cssW - pad * 2) / spanX, (cssH - pad * 2) / spanY);
+    s = Math.max(0.12, Math.min(s, 6));
+    const cur = getMapAlign();
+    const rotation = cur.rotation || 0;
+    const rad = rotation * Math.PI / 180;
+    const mx = mid.x * s;
+    const my = mid.y * s;
+    const rx = mx * Math.cos(rad) - my * Math.sin(rad);
+    const ry = mx * Math.sin(rad) + my * Math.cos(rad);
+    return {
+      align: { offsetX: -rx, offsetY: -ry, scale: s, rotation },
+      view: { ...DEFAULT_MAP_VIEW },
+      unlock: !holeHasGpsCalib(mapSession.holeIndex)
+    };
+  }
+  if (mapPhotoSource === "course" && mapSession.course?.sharedMapAlign && !holeHasGpsCalib(mapSession.holeIndex)) {
+    return {
+      align: copyMapXform(mapSession.course.sharedMapAlign),
+      view: copyMapXform(mapSession.course.sharedMapView || DEFAULT_MAP_VIEW),
+      unlock: false
+    };
+  }
+  return null;
+}
+
+function copyMapXform(x) {
+  return {
+    offsetX: x?.offsetX || 0,
+    offsetY: x?.offsetY || 0,
+    scale: x?.scale != null ? x.scale : 1,
+    rotation: x?.rotation || 0
+  };
+}
+
+function mapXformNearlyEqual(a, b) {
+  return Math.abs(a.offsetX - b.offsetX) < 0.5 &&
+    Math.abs(a.offsetY - b.offsetY) < 0.5 &&
+    Math.abs(a.scale - b.scale) < 0.01 &&
+    Math.abs(a.rotation - b.rotation) < 0.5;
+}
+
+function lerpNum(a, b, t) { return a + (b - a) * t; }
+function lerpAngleDeg(a, b, t) {
+  let d = ((b - a + 540) % 360) - 180;
+  return a + d * t;
+}
+function easeInOutCubic(t) {
+  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+}
+
+let mapXformAnimRaf = null;
+let mapXformAnimating = false;
+
+function cancelMapXformAnim() {
+  if (mapXformAnimRaf) {
+    cancelAnimationFrame(mapXformAnimRaf);
+    mapXformAnimRaf = null;
+  }
+  mapXformAnimating = false;
+}
+
+function animateMapXform(fromAlign, fromView, toAlign, toView, ms) {
+  cancelMapXformAnim();
+  const align = getMapAlign();
+  const view = getMapView();
+  const dur = ms || 360;
+  const t0 = performance.now();
+  mapXformAnimating = true;
+
+  function frame(now) {
+    if (!mapSession) {
+      cancelMapXformAnim();
+      return;
+    }
+    const t = Math.min(1, (now - t0) / dur);
+    const e = easeInOutCubic(t);
+    align.offsetX = lerpNum(fromAlign.offsetX, toAlign.offsetX, e);
+    align.offsetY = lerpNum(fromAlign.offsetY, toAlign.offsetY, e);
+    align.scale = lerpNum(fromAlign.scale, toAlign.scale, e);
+    align.rotation = lerpAngleDeg(fromAlign.rotation, toAlign.rotation, e);
+    view.offsetX = lerpNum(fromView.offsetX, toView.offsetX, e);
+    view.offsetY = lerpNum(fromView.offsetY, toView.offsetY, e);
+    view.scale = lerpNum(fromView.scale, toView.scale, e);
+    view.rotation = lerpAngleDeg(fromView.rotation, toView.rotation, e);
+    drawHoleMap();
+    if (t < 1) {
+      mapXformAnimRaf = requestAnimationFrame(frame);
+    } else {
+      Object.assign(align, copyMapXform(toAlign));
+      Object.assign(view, copyMapXform(toView));
+      mapXformAnimRaf = null;
+      mapXformAnimating = false;
+      drawHoleMap();
+    }
+  }
+  mapXformAnimRaf = requestAnimationFrame(frame);
+}
+
+/**
+ * Center midway between photo T and P and zoom so both fit in view.
+ * Returns true when applied.
+ */
+function fitMapToPhotoTeePin(opts) {
+  if (!mapSession) return false;
+  const h = ensureCourseHole(mapSession.holeIndex, mapSession.course);
+  if (!h?.photoCalib?.tee || !h?.photoCalib?.pin) return false;
+  const t = computeMapHoleFramingTarget();
+  if (!t) return false;
+  if (t.unlock) h.mapLocked = false;
+  if (opts && opts.animate) {
+    animateMapXform(copyMapXform(getMapAlign()), copyMapXform(getMapView()), t.align, t.view, 420);
+  } else {
+    Object.assign(getMapAlign(), t.align);
+    Object.assign(getMapView(), t.view);
+  }
+  return true;
+}
+
+function applyMapHoleFraming(opts) {
+  const animate = !!(opts && opts.animate);
+  const target = computeMapHoleFramingTarget();
+  if (target) {
+    const h = ensureCourseHole(mapSession.holeIndex, mapSession.course);
+    if (target.unlock) h.mapLocked = false;
+    if (animate) {
+      animateMapXform(copyMapXform(getMapAlign()), copyMapXform(getMapView()), target.align, target.view, 360);
+    } else {
+      Object.assign(getMapAlign(), target.align);
+      Object.assign(getMapView(), target.view);
+    }
+    return;
+  }
+  applyCourseSharedMapXformIfNeeded();
 }
 
 function persistMapAlign() {
@@ -3265,8 +3448,9 @@ function handleMapCalibTap(sx, sy) {
       persistMapAlign();
       showToast("Calibrated — shots mapped to tee & pin");
     } else {
+      fitMapToPhotoTeePin({ animate: true });
       persistMapAlign();
-      showToast("Photo tee & pin saved — Tee Off / Hole Out later to finish GPS align");
+      showToast("Photo tee & pin saved — framed in view");
     }
   } else {
     persistMapAlign();
@@ -3711,6 +3895,7 @@ function bindMapGestures() {
 
   canvas.addEventListener("pointerdown", e => {
     if (!mapSession) return;
+    cancelMapXformAnim();
     const pos = canvasPos(e);
 
     if (mapTapMode) {
