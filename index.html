@@ -313,6 +313,35 @@
     .map-legend .leg-shot::before { background: #e67e22; }
     .map-legend .leg-pin::before { background: #2ecc71; }
     .map-legend .leg-walk::before { background: #3498db; }
+    .map-legend .leg-you::before { background: #3498db; box-shadow: 0 0 0 3px rgba(52,152,219,0.35); }
+
+    #review-content.review-slide-from-left {
+      animation: reviewInFromLeft 0.22s ease-out;
+    }
+    #review-content.review-slide-from-right {
+      animation: reviewInFromRight 0.22s ease-out;
+    }
+    @keyframes reviewInFromLeft {
+      from { transform: translateX(-28px); opacity: 0.35; }
+      to { transform: translateX(0); opacity: 1; }
+    }
+    @keyframes reviewInFromRight {
+      from { transform: translateX(28px); opacity: 0.35; }
+      to { transform: translateX(0); opacity: 1; }
+    }
+    .review-hole-title { cursor: pointer; }
+    .review-hole-title:active { opacity: 0.75; }
+    .stat-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 8px 0;
+      border-bottom: 1px solid var(--border);
+      font-size: 14px;
+    }
+    .stat-row:last-child { border-bottom: none; }
+    .stat-row span { color: var(--muted); }
+    .stat-row strong { font-weight: 600; }
 
     .setting-row {
       display: flex;
@@ -582,8 +611,8 @@
       </div>
       <div class="setting-row">
         <div class="setting-text">
-          <strong>Auto pocket lock</strong>
-          <span>In shot mode, lock the screen after a short idle so pocket taps do nothing. Swipe to unlock.</span>
+          <strong>Auto screen lock</strong>
+          <span>In shot mode, lock after a short idle so pocket taps do nothing. Swipe to unlock. Default on.</span>
         </div>
         <label class="switch">
           <input type="checkbox" id="setting-pocket-lock" onchange="onPocketLockAutoToggle(this.checked)">
@@ -693,6 +722,7 @@
         <button class="btn-primary" id="btn-main" style="flex:2" onclick="mainAction()">Begin Round</button>
         <button class="btn-secondary" id="btn-holeout" onclick="holeOut()" style="display:none">Hole Out</button>
       </div>
+      <button type="button" class="btn-secondary" id="btn-setup-map" onclick="openMapSetup()" style="width:100%;margin-top:10px;display:none">Setup Map</button>
       <button type="button" class="btn-secondary" id="btn-pocket-lock" onclick="engagePocketLock()" style="width:100%;margin-top:10px;display:none">Lock screen</button>
     </div>
   </div>
@@ -725,7 +755,10 @@
   <div id="screen-review" class="screen">
     <div class="header">
       <button class="btn-secondary" onclick="showScreen('home')">← Back</button>
-      <h2>Round Review</h2>
+      <div style="text-align:center">
+        <h2 style="margin:0">Round Review</h2>
+        <div id="review-game-label" style="font-size:12px;color:var(--muted);margin-top:2px"></div>
+      </div>
       <div style="width:60px"></div>
     </div>
     <div id="review-content"></div>
@@ -838,6 +871,7 @@
         <span class="leg-shot">Shot</span>
         <span class="leg-pin">Green / pin</span>
         <span class="leg-walk">Walk</span>
+        <span class="leg-you" id="map-leg-you" style="display:none">You</span>
       </div>
       <p class="modal-note" id="map-status-line" style="margin-top:6px">Set tee &amp; pin on the photo to place shots. Drag orange marks to nudge.</p>
     </div>
@@ -853,6 +887,26 @@
         <button type="button" class="btn-primary" onclick="confirmMapImageScope('course')">All holes</button>
       </div>
       <button type="button" class="btn-secondary" style="width:100%;margin-top:10px" onclick="cancelMapImageScope()">Cancel</button>
+    </div>
+  </div>
+
+  <!-- MODAL: Hole history -->
+  <div id="modal-hole-history" class="modal">
+    <div class="modal-content">
+      <h3 id="hole-history-title" style="margin-bottom:8px">Hole history</h3>
+      <div id="hole-history-body"></div>
+      <button type="button" class="btn-secondary" style="width:100%;margin-top:16px" onclick="closeModal()">Close</button>
+    </div>
+  </div>
+
+  <!-- MODAL: Exit round -->
+  <div id="modal-exit-round" class="modal">
+    <div class="modal-content">
+      <h3 style="margin-bottom:8px">Exit round?</h3>
+      <p class="modal-note">Save to continue later from Recent, discard to throw away this session’s progress, or cancel to keep playing.</p>
+      <button type="button" class="btn-primary" style="width:100%;margin-top:12px" onclick="closeModal(); exitRoundAndSave()">Save and exit</button>
+      <button type="button" class="btn-danger" style="width:100%;margin-top:10px" onclick="exitRoundDiscard()">Exit without saving</button>
+      <button type="button" class="btn-secondary" style="width:100%;margin-top:10px" onclick="closeModal()">Cancel</button>
     </div>
   </div>
 
@@ -1050,12 +1104,14 @@ function updateLiveDistance() {
   if (document.getElementById("modal-confirm").classList.contains("active") && pendingDistance > 0) {
     el.textContent = Math.round(pendingDistance) + " m";
     syncPocketLockDistance(el.textContent);
+    maybeRedrawLiveMap();
     return;
   }
 
   if (isTeeingOff || !anchorPosition || !currentPosition) {
     el.textContent = "—";
     syncPocketLockDistance("—");
+    maybeRedrawLiveMap();
     return;
   }
 
@@ -1065,6 +1121,7 @@ function updateLiveDistance() {
   );
   el.textContent = Math.round(dist) + " m";
   syncPocketLockDistance(el.textContent);
+  maybeRedrawLiveMap();
 
   if (document.getElementById("modal-tee").classList.contains("active")) {
     updateToHoleDisplay("tee-to-hole", currentPosition);
@@ -1209,8 +1266,8 @@ function recordDrive(from, to) {
   saveData();
 }
 
-function driveStabilityText(holeIndex) {
-  const courseHole = ensureCourseHole(holeIndex);
+function driveStabilityText(holeIndex, course) {
+  const courseHole = ensureCourseHole(holeIndex, course);
   if (!courseHole) return "";
   const drives = courseHole.drives || [];
   const n = drives.length;
@@ -1259,13 +1316,22 @@ function renderHome() {
   el.innerHTML = recent.map(r => {
     const course = courses.find(c => c.id === r.courseId);
     const totalShots = r.holes.reduce((sum, h) => sum + h.shots.length, 0);
+    const game = gameNumberForRound(r);
+    const gameBit = game ? ` · Game ${game.n}` : "";
+    const partial = isPartialRound(r);
+    const actions = partial
+      ? `<div style="display:flex;gap:6px;flex-shrink:0">
+          <button class="btn-secondary" style="padding:8px 10px;font-size:13px" onclick="reviewRound('${r.id}')">View</button>
+          <button class="btn-primary" style="padding:8px 10px;font-size:13px" onclick="resumePartialRound('${r.id}')">Continue</button>
+        </div>`
+      : `<button class="btn-secondary" style="padding:8px 12px;font-size:13px" onclick="reviewRound('${r.id}')">View</button>`;
     return `
-      <div style="padding:12px 0;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
-        <div>
+      <div style="padding:12px 0;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;gap:10px">
+        <div style="min-width:0">
           <div style="font-weight:600">${course ? escapeHtml(course.name) : "Unknown"}</div>
-          <div style="font-size:13px;color:var(--muted)">${new Date(r.date).toLocaleDateString()} · ${totalShots} shots${r.partial ? " · partial" : ""}</div>
+          <div style="font-size:13px;color:var(--muted)">${new Date(r.date).toLocaleDateString()} · ${totalShots} shots${gameBit}${partial ? " · partial" : ""}</div>
         </div>
-        <button class="btn-secondary" style="padding:8px 12px;font-size:13px" onclick="reviewRound('${r.id}')">View</button>
+        ${actions}
       </div>`;
   }).join("");
 }
@@ -1439,6 +1505,7 @@ function updatePlayUI() {
     lockBtn.style.display = (!isTeeingOff && currentRound) ? "block" : "none";
   }
   schedulePocketLockIdle();
+  refreshSetupMapButton();
 
   const clubEl = document.getElementById("current-club-display");
   if (clubEl) {
@@ -1729,6 +1796,7 @@ function upsertRound(round) {
 }
 
 function exitRoundAndSave() {
+  document.getElementById("modal-exit-round")?.classList.remove("active");
   unlockPocketLock();
   clearPocketLockIdle();
   stopAutoMarkWatch();
@@ -1760,9 +1828,20 @@ function confirmExitRound() {
     }
     return;
   }
-  if (confirm("Save this round and exit?")) {
-    exitRoundAndSave();
-  }
+  document.getElementById("modal-exit-round").classList.add("active");
+}
+
+function exitRoundDiscard() {
+  document.getElementById("modal-exit-round")?.classList.remove("active");
+  unlockPocketLock();
+  clearPocketLockIdle();
+  stopAutoMarkWatch();
+  stopGPS();
+  // In-memory play uses a clone when resumed; leaving rounds[] untouched discards edits.
+  // Brand-new unsaved rounds were never inserted until save.
+  currentRound = null;
+  showScreen("home");
+  showToast("Round discarded");
 }
 
 // ---------- Phone / browser back ----------
@@ -1779,6 +1858,16 @@ function closeTopModal() {
   const scope = document.getElementById("modal-map-image-scope");
   if (scope?.classList.contains("active")) {
     cancelMapImageScope();
+    return true;
+  }
+  const exitM = document.getElementById("modal-exit-round");
+  if (exitM?.classList.contains("active")) {
+    exitM.classList.remove("active");
+    return true;
+  }
+  const hist = document.getElementById("modal-hole-history");
+  if (hist?.classList.contains("active")) {
+    hist.classList.remove("active");
     return true;
   }
   const map = document.getElementById("modal-map");
@@ -1890,6 +1979,7 @@ function applyMockPosition(pos) {
   status.textContent = `Mock GPS (±${Math.round(pos.accuracy || 5)} m)`;
   status.className = "status warn";
   updateLiveDistance();
+  maybeRedrawLiveMap();
 }
 
 function enableMockGps(reason) {
@@ -2037,25 +2127,83 @@ function jumpToHole(index) {
 }
 
 // ---------- Review ----------
-function reviewRound(id) {
+function isPartialRound(round) {
+  if (!round) return false;
+  if (round.completed === true) return false;
+  return !!round.partial || round.completed === false;
+}
+
+function roundsForCourse(courseId) {
+  return rounds
+    .filter(r => r.courseId === courseId)
+    .slice()
+    .sort((a, b) => new Date(a.date) - new Date(b.date));
+}
+
+function gameNumberForRound(round) {
+  if (!round) return null;
+  const list = roundsForCourse(round.courseId);
+  const idx = list.findIndex(r => r.id === round.id);
+  if (idx < 0) return null;
+  return { n: idx + 1, total: list.length, list };
+}
+
+function neighborRoundId(round, delta) {
+  const g = gameNumberForRound(round);
+  if (!g) return null;
+  const next = g.list[g.n - 1 + delta];
+  return next ? next.id : null;
+}
+
+function knownTeeForHole(courseId, holeIndex, roundHole) {
+  if (roundHole?.teePosition) return roundHole.teePosition;
+  if (roundHole?.shots?.[0]?.from) return roundHole.shots[0].from;
+  const list = roundsForCourse(courseId);
+  for (let i = list.length - 1; i >= 0; i--) {
+    const h = list[i].holes?.[holeIndex];
+    if (h?.teePosition) return h.teePosition;
+    if (h?.shots?.[0]?.from) return h.shots[0].from;
+  }
+  return null;
+}
+
+function reviewRound(id, opts) {
   const round = rounds.find(r => r.id === id);
   if (!round) return;
   const course = courses.find(c => c.id === round.courseId);
+  const game = gameNumberForRound(round);
+  const gameLabel = document.getElementById("review-game-label");
+  if (gameLabel) {
+    gameLabel.textContent = game
+      ? `Game ${game.n} of ${game.total}${isPartialRound(round) ? " · partial" : ""}`
+      : "";
+  }
 
   let html = `
-    <div class="card">
+    <div class="card" data-review-chrome="1">
       <div style="font-weight:600;font-size:18px">${course ? escapeHtml(course.name) : "Unknown"}</div>
-      <div style="color:var(--muted);font-size:13px">${new Date(round.date).toLocaleString()}</div>
+      <div style="color:var(--muted);font-size:13px;margin-top:4px">${new Date(round.date).toLocaleString()}</div>
+      <div style="color:var(--accent);font-size:14px;font-weight:600;margin-top:8px">
+        ${game ? `Game ${game.n} of ${game.total}` : "Game —"}${isPartialRound(round) ? " · partial" : ""}
+      </div>
+      <p class="modal-note" style="margin-top:8px">Swipe sideways for other games at this course. Tap a hole title for history.</p>
+      ${isPartialRound(round)
+        ? `<button class="btn-primary" style="width:100%;margin-top:12px" onclick="resumePartialRound('${round.id}')">Continue Round</button>`
+        : ""}
     </div>
   `;
 
   round.holes.forEach((h, i) => {
     if (h.shots.length === 0 && !h.teePosition) return;
     const canMap = !!(h.teePosition || h.shots.length || (course && course.holes[i] && course.holes[i].pin));
-    html += `<div class="card">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-        <div style="font-weight:600">Hole ${h.holeNumber} (Par ${h.par})</div>
-        ${canMap ? `<button class="btn-secondary" style="padding:8px 12px;font-size:13px" onclick="openHoleMapFromReview('${round.id}',${i})">Map</button>` : ""}
+    const courseId = course ? course.id : round.courseId;
+    html += `<div class="card" data-review-chrome="1">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:8px">
+        <div class="review-hole-title" style="font-weight:600;flex:1" onclick="openHoleHistory('${courseId}',${i},'${round.id}')">
+          Hole ${h.holeNumber} (Par ${h.par}) · ${h.shots.length} shot${h.shots.length === 1 ? "" : "s"}
+          <div style="font-size:12px;color:var(--muted);font-weight:400;margin-top:2px">Tap for hole history</div>
+        </div>
+        ${canMap ? `<button class="btn-secondary" style="padding:8px 12px;font-size:13px" onclick="event.stopPropagation();openHoleMapFromReview('${round.id}',${i})">Map</button>` : ""}
       </div>
       <ul class="shot-list">`;
     if (h.shots.length === 0) {
@@ -2074,9 +2222,207 @@ function reviewRound(id) {
     html += `</ul></div>`;
   });
 
-  document.getElementById("review-content").innerHTML = html;
+  const content = document.getElementById("review-content");
+  content.classList.remove("review-slide-from-left", "review-slide-from-right");
+  content.innerHTML = html;
+  if (opts?.animate === "from-left") {
+    void content.offsetWidth;
+    content.classList.add("review-slide-from-left");
+  } else if (opts?.animate === "from-right") {
+    void content.offsetWidth;
+    content.classList.add("review-slide-from-right");
+  }
   window._reviewRoundId = id;
+  bindReviewSwipe();
   showScreen("review");
+}
+
+let reviewSwipeBound = false;
+let reviewSwipeX0 = 0;
+let reviewSwipeY0 = 0;
+let reviewSwipeActive = false;
+let reviewSwipeIgnore = false;
+
+function bindReviewSwipe() {
+  if (reviewSwipeBound) return;
+  reviewSwipeBound = true;
+  const root = document.getElementById("screen-review");
+  if (!root) return;
+
+  root.addEventListener("pointerdown", e => {
+    if (getActiveScreenId() !== "review") return;
+    const t = e.target;
+    if (t.closest(".shot-list li") || t.closest("button") || t.closest("a")) {
+      reviewSwipeIgnore = true;
+      return;
+    }
+    reviewSwipeIgnore = false;
+    reviewSwipeActive = true;
+    reviewSwipeX0 = e.clientX;
+    reviewSwipeY0 = e.clientY;
+  }, { passive: true });
+
+  root.addEventListener("pointerup", e => {
+    if (!reviewSwipeActive || reviewSwipeIgnore) {
+      reviewSwipeActive = false;
+      return;
+    }
+    reviewSwipeActive = false;
+    const dx = e.clientX - reviewSwipeX0;
+    const dy = e.clientY - reviewSwipeY0;
+    if (Math.abs(dx) < 70 || Math.abs(dx) < Math.abs(dy) * 1.2) return;
+    const round = rounds.find(r => r.id === window._reviewRoundId);
+    if (!round) return;
+    // swipe right → subsequent (higher game) from left; swipe left → previous from right
+    if (dx > 0) {
+      const nextId = neighborRoundId(round, 1);
+      if (!nextId) { showToast("Latest game"); return; }
+      reviewRound(nextId, { animate: "from-left" });
+    } else {
+      const prevId = neighborRoundId(round, -1);
+      if (!prevId) { showToast("First game"); return; }
+      reviewRound(prevId, { animate: "from-right" });
+    }
+  }, { passive: true });
+}
+
+function openHoleHistory(courseId, holeIndex, highlightRoundId) {
+  const course = courses.find(c => c.id === courseId);
+  if (!course || !course.holes[holeIndex]) {
+    showToast("Course hole not found");
+    return;
+  }
+  const holeNum = holeIndex + 1;
+  const par = course.holes[holeIndex].par;
+  document.getElementById("hole-history-title").textContent =
+    `Hole ${holeNum} · Par ${par}`;
+
+  const scores = [];
+  roundsForCourse(courseId).forEach(r => {
+    const h = r.holes?.[holeIndex];
+    if (!h || (!h.teePosition && !(h.shots && h.shots.length))) return;
+    scores.push({
+      roundId: r.id,
+      date: r.date,
+      strokes: h.shots.length,
+      partial: isPartialRound(r)
+    });
+  });
+
+  const courseHole = ensureCourseHole(holeIndex, course);
+  const drives = courseHole.drives || [];
+  let body = "";
+
+  if (!scores.length && !drives.length) {
+    body = `<p class="modal-note">No history for this hole yet.</p>`;
+  } else {
+    if (scores.length) {
+      const strokes = scores.map(s => s.strokes);
+      const avg = strokes.reduce((a, b) => a + b, 0) / strokes.length;
+      const best = Math.min(...strokes);
+      const worst = Math.max(...strokes);
+      body += `
+        <div class="stat-row"><span>Rounds played</span><strong>${scores.length}</strong></div>
+        <div class="stat-row"><span>Avg strokes</span><strong>${avg.toFixed(1)}</strong></div>
+        <div class="stat-row"><span>Best</span><strong>${best}</strong></div>
+        <div class="stat-row"><span>Worst</span><strong>${worst}</strong></div>
+        <div class="label" style="margin-top:14px">Recent scores</div>
+        <ul class="shot-list">`;
+      scores.slice(-5).reverse().forEach(s => {
+        const mark = s.roundId === highlightRoundId ? " · this round" : "";
+        body += `<li><span>${new Date(s.date).toLocaleDateString()}${s.partial ? " · partial" : ""}${mark}</span><strong>${s.strokes}</strong></li>`;
+      });
+      body += `</ul>`;
+    }
+
+    if (drives.length) {
+      const dists = drives.map(d => d.distanceM).filter(n => typeof n === "number");
+      const avgD = dists.length ? dists.reduce((a, b) => a + b, 0) / dists.length : 0;
+      const longD = dists.length ? Math.max(...dists) : 0;
+      body += `
+        <div class="label" style="margin-top:14px">Drives</div>
+        <div class="stat-row"><span>Samples</span><strong>${drives.length}</strong></div>
+        <div class="stat-row"><span>Avg distance</span><strong>${Math.round(avgD)} m</strong></div>
+        <div class="stat-row"><span>Longest</span><strong>${Math.round(longD)} m</strong></div>`;
+      const stab = driveStabilityText(holeIndex, course);
+      if (stab) body += `<p class="modal-note">${escapeHtml(stab)}</p>`;
+    }
+
+    const pin = courseHole.pin;
+    if (pin) {
+      body += `<div class="stat-row"><span>Pin</span><strong>${pin.locked ? "Locked" : `${pin.count || pin.marks?.length || 1} mark(s)`}</strong></div>`;
+    }
+  }
+
+  document.getElementById("hole-history-body").innerHTML = body;
+  document.getElementById("modal-hole-history").classList.add("active");
+}
+
+function resumePartialRound(roundId) {
+  if (currentRound && currentRound.id !== roundId) {
+    showToast("Exit or save your current round first");
+    return;
+  }
+  const round = rounds.find(r => r.id === roundId);
+  if (!round || !isPartialRound(round)) {
+    showToast("Not a partial round");
+    return;
+  }
+  const course = courses.find(c => c.id === round.courseId);
+  if (!course) {
+    showToast("Course not found");
+    return;
+  }
+
+  currentCourse = course;
+  currentRound = JSON.parse(JSON.stringify(round));
+  course.holes.forEach((_, i) => ensureCourseHole(i));
+  currentRound.holes.forEach(h => {
+    if (!h.walkTrack) h.walkTrack = [];
+    if (!h.shots) h.shots = [];
+  });
+
+  let idx = 0;
+  for (let i = 0; i < currentRound.holes.length; i++) {
+    const h = currentRound.holes[i];
+    if (h.teePosition || (h.shots && h.shots.length)) idx = i;
+  }
+  const hole = currentRound.holes[idx];
+  const finished = hole.shots.some(s => s.holeOut);
+  if (finished && idx < currentRound.holes.length - 1) {
+    currentHoleIndex = idx + 1;
+    isTeeingOff = true;
+    anchorPosition = null;
+    clubForCurrentShot = null;
+  } else if (hole.shots.length) {
+    currentHoleIndex = idx;
+    isTeeingOff = false;
+    const last = hole.shots[hole.shots.length - 1];
+    anchorPosition = last.to
+      ? { lat: last.to.lat, lon: last.to.lon }
+      : (hole.teePosition ? { lat: hole.teePosition.lat, lon: hole.teePosition.lon } : null);
+    clubForCurrentShot = hole.nextClub || null;
+  } else if (hole.teePosition) {
+    currentHoleIndex = idx;
+    isTeeingOff = false;
+    anchorPosition = { lat: hole.teePosition.lat, lon: hole.teePosition.lon };
+    clubForCurrentShot = hole.teePosition.club || hole.nextClub || null;
+  } else {
+    currentHoleIndex = idx;
+    isTeeingOff = true;
+    anchorPosition = null;
+    clubForCurrentShot = null;
+  }
+
+  pendingShotPosition = null;
+  selectedClub = null;
+  mockMoveStep = 0;
+  document.getElementById("play-course-name").textContent = course.name;
+  updatePlayUI();
+  startGPS();
+  if (settings.autoMark && !isTeeingOff) startAutoMarkWatch();
+  showScreen("play");
+  showToast("Continuing round");
 }
 
 // ---------- Hole map (photo underlay) ----------
@@ -2237,23 +2583,30 @@ function isOneHitToGreen(roundHole, pin) {
   return haversine(to.lat, to.lon, pin.lat, pin.lon) <= ON_GREEN_M;
 }
 
-function collectMapPoints(roundHole, courseHole) {
+function collectMapPoints(roundHole, courseHole, courseId, holeIndex) {
   const pin = courseHole && courseHole.pin ? courseHole.pin : null;
-  const tee = roundHole.teePosition || (roundHole.shots[0] && roundHole.shots[0].from) || null;
+  const tee = knownTeeForHole(
+    courseId || (mapSession && mapSession.courseId),
+    holeIndex != null ? holeIndex : (mapSession && mapSession.holeIndex),
+    roundHole
+  );
   const shots = [];
-  roundHole.shots.forEach((s, i) => {
-    if (s.to) shots.push({ lat: s.to.lat, lon: s.to.lon, shotIndex: i });
-  });
+  if (roundHole?.shots) {
+    roundHole.shots.forEach((s, i) => {
+      if (s.to) shots.push({ lat: s.to.lat, lon: s.to.lon, shotIndex: i });
+    });
+  }
   let green = null;
   if (pin) green = { lat: pin.lat, lon: pin.lon };
   return { tee, shots, green };
 }
 
-function openHoleMap() {
+function openHoleMap(opts) {
   if (!currentRound || !currentCourse) return;
   const hole = currentRound.holes[currentHoleIndex];
   const pin = getPin(currentHoleIndex);
-  if (!hole.teePosition && !hole.shots.length && !pin) {
+  const setup = !!(opts && opts.setup);
+  if (!setup && !hole.teePosition && !hole.shots.length && !pin) {
     showToast("No positions to show yet");
     return;
   }
@@ -2264,6 +2617,37 @@ function openHoleMap() {
     course: currentCourse,
     persistRounds: false
   });
+}
+
+function openMapSetup() {
+  openHoleMap({ setup: true });
+}
+
+async function courseHasDefaultMap(courseId) {
+  if (!courseId) return false;
+  try {
+    const blob = await idbGetImage(courseImageKey(courseId));
+    return !!blob;
+  } catch (e) {
+    return false;
+  }
+}
+
+async function refreshSetupMapButton() {
+  const btn = document.getElementById("btn-setup-map");
+  if (!btn) return;
+  if (!currentRound || !currentCourse || !isTeeingOff) {
+    btn.style.display = "none";
+    return;
+  }
+  const hole = currentRound.holes[currentHoleIndex];
+  const atBegin = currentHoleIndex === 0 && hole && !hole.teePosition;
+  if (!atBegin) {
+    btn.style.display = "none";
+    return;
+  }
+  const hasMap = await courseHasDefaultMap(currentCourse.id);
+  btn.style.display = hasMap ? "none" : "block";
 }
 
 function openHoleMapFromReview(roundId, holeIndex) {
@@ -2392,12 +2776,13 @@ async function loadMapImageForSession() {
   if (!mapSession) return;
 
   const holeNum = mapSession.roundHole.holeNumber;
-  let blob = await idbGetImage(holeImageKey(mapSession.courseId, holeNum));
+  // Prefer course default photo for every hole when it exists
+  let blob = await idbGetImage(courseImageKey(mapSession.courseId));
   if (blob) {
-    mapPhotoSource = "hole";
+    mapPhotoSource = "course";
   } else {
-    blob = await idbGetImage(courseImageKey(mapSession.courseId));
-    if (blob) mapPhotoSource = "course";
+    blob = await idbGetImage(holeImageKey(mapSession.courseId, holeNum));
+    if (blob) mapPhotoSource = "hole";
   }
   updateMapPhotoSourceUI();
   if (!blob) return;
@@ -2434,10 +2819,10 @@ function updateMapStatusLine() {
   }
   const h = mapSession && ensureCourseHole(mapSession.holeIndex, mapSession.course);
   const calib = h && h.photoCalib;
-  const photoBit = mapPhotoSource === "hole"
-    ? "Hole photo"
-    : mapPhotoSource === "course"
-      ? "Course photo"
+  const photoBit = mapPhotoSource === "course"
+    ? "Course photo (all holes)"
+    : mapPhotoSource === "hole"
+      ? "Hole photo"
       : "No photo";
   if (calib && calib.tee && calib.pin) {
     el.textContent = `${photoBit} · calibrated (Set tee/pin or Manual align to refine)`;
@@ -2693,10 +3078,24 @@ function drawHoleMap() {
   ctx.fillRect(0, 0, cssW, cssH);
 
   const courseHole = ensureCourseHole(mapSession.holeIndex, mapSession.course);
-  const pts = collectMapPoints(mapSession.roundHole, courseHole);
-  const origin = pts.tee || (pts.shots[0] && { lat: pts.shots[0].lat, lon: pts.shots[0].lon }) || pts.green;
+  const pts = collectMapPoints(
+    mapSession.roundHole,
+    courseHole,
+    mapSession.courseId,
+    mapSession.holeIndex
+  );
+  const liveMap = isLiveMapSession();
+  const youPos = liveMap && currentPosition
+    ? { lat: currentPosition.lat, lon: currentPosition.lon }
+    : null;
+  const origin = pts.tee
+    || (pts.shots[0] && { lat: pts.shots[0].lat, lon: pts.shots[0].lon })
+    || pts.green
+    || youPos;
   mapHitShots = [];
   mapGeoOrigin = origin || null;
+  const youLeg = document.getElementById("map-leg-you");
+  if (youLeg) youLeg.style.display = youPos ? "" : "none";
   if (!origin) {
     ctx.fillStyle = "#95a5a6";
     ctx.font = "14px sans-serif";
@@ -2711,9 +3110,11 @@ function drawHoleMap() {
     shotIndex: s.shotIndex
   }));
   const greenM = pts.green ? latLonToMeters(origin, pts.green) : null;
+  const youM = youPos ? latLonToMeters(origin, youPos) : null;
   if (teeM) meterPts.push(teeM);
   shotM.forEach(p => meterPts.push(p));
   if (greenM) meterPts.push(greenM);
+  if (youM) meterPts.push(youM);
 
   const walkRaw = settings.showWalkTrack ? (mapSession.roundHole.walkTrack || []) : [];
   const walkM = walkRaw.map(p => latLonToMeters(origin, p));
@@ -2800,7 +3201,33 @@ function drawHoleMap() {
   });
   if (greenM) drawMarker(metersToCanvas(greenM, mapFit), "#2ecc71", 9);
 
+  if (youM) {
+    const yp = metersToCanvas(youM, mapFit);
+    const rr = 11 / Math.max(view.scale, 0.01);
+    ctx.beginPath();
+    ctx.fillStyle = "rgba(52,152,219,0.25)";
+    ctx.arc(yp.x, yp.y, rr * 1.8, 0, Math.PI * 2);
+    ctx.fill();
+    drawMarker(yp, "#3498db", 8, "#fff");
+  }
+
   ctx.restore();
+}
+
+function isLiveMapSession() {
+  if (!mapSession || !currentRound || !currentPosition) return false;
+  if (mapSession.persistRounds) return false;
+  if (mapSession.roundId && mapSession.roundId !== currentRound.id) return false;
+  return document.getElementById("modal-map")?.classList.contains("active");
+}
+
+let liveMapRedrawAt = 0;
+function maybeRedrawLiveMap() {
+  if (!isLiveMapSession()) return;
+  const now = Date.now();
+  if (now - liveMapRedrawAt < 900) return;
+  liveMapRedrawAt = now;
+  drawHoleMap();
 }
 
 function onMapPhotoPicked(ev) {
@@ -3090,7 +3517,7 @@ function onPocketLockAutoToggle(on) {
   saveSettings();
   if (!on) clearPocketLockIdle();
   else schedulePocketLockIdle();
-  showToast(on ? "Auto pocket lock on" : "Auto pocket lock off");
+  showToast(on ? "Auto screen lock on" : "Auto screen lock off");
 }
 
 // ---------- Pocket lock ----------
