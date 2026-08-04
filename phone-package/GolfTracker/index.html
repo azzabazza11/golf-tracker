@@ -366,6 +366,81 @@
     .shot-list li.editable:active { opacity: 0.85; }
     .club-missing { color: var(--warning); }
 
+    .pocket-lock {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 500;
+      background:
+        radial-gradient(ellipse at 50% 20%, rgba(46, 204, 113, 0.18), transparent 50%),
+        var(--bg);
+      touch-action: none;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    .pocket-lock.show { display: flex; align-items: center; justify-content: center; }
+    .pocket-lock-inner {
+      width: min(360px, 92vw);
+      text-align: center;
+      padding: 24px 16px;
+    }
+    .pocket-lock-dist {
+      font-size: 56px;
+      font-weight: 700;
+      color: var(--accent);
+      line-height: 1.1;
+      margin-bottom: 6px;
+    }
+    .pocket-lock-sub {
+      color: var(--muted);
+      font-size: 14px;
+      margin-bottom: 28px;
+    }
+    .pocket-lock-title {
+      font-size: 18px;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+    .pocket-swipe {
+      position: relative;
+      height: 64px;
+      border-radius: 32px;
+      background: var(--pill);
+      border: 1px solid var(--border);
+      overflow: hidden;
+      touch-action: none;
+    }
+    .pocket-swipe-text {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--muted);
+      font-size: 15px;
+      font-weight: 600;
+      pointer-events: none;
+      padding-left: 28px;
+    }
+    .pocket-swipe-knob {
+      position: absolute;
+      top: 4px;
+      left: 4px;
+      width: 56px;
+      height: 56px;
+      border-radius: 50%;
+      background: var(--accent);
+      color: #000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 22px;
+      font-weight: 700;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.25);
+      z-index: 1;
+      will-change: transform;
+    }
+
     #splash {
       position: fixed;
       inset: 0;
@@ -507,6 +582,16 @@
       </div>
       <div class="setting-row">
         <div class="setting-text">
+          <strong>Auto pocket lock</strong>
+          <span>In shot mode, lock the screen after a short idle so pocket taps do nothing. Swipe to unlock.</span>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="setting-pocket-lock" onchange="onPocketLockAutoToggle(this.checked)">
+          <span class="slider"></span>
+        </label>
+      </div>
+      <div class="setting-row">
+        <div class="setting-text">
           <strong>Auto-mark shots</strong>
           <span>Trial: walk then stand still to mark. Assign clubs later. Needs motion permission.</span>
         </div>
@@ -607,6 +692,20 @@
       <div class="row">
         <button class="btn-primary" id="btn-main" style="flex:2" onclick="mainAction()">Begin Round</button>
         <button class="btn-secondary" id="btn-holeout" onclick="holeOut()" style="display:none">Hole Out</button>
+      </div>
+      <button type="button" class="btn-secondary" id="btn-pocket-lock" onclick="engagePocketLock()" style="width:100%;margin-top:10px;display:none">Lock screen</button>
+    </div>
+  </div>
+
+  <!-- Pocket lock (covers UI while walking with phone in pocket) -->
+  <div id="pocket-lock" class="pocket-lock" aria-hidden="true">
+    <div class="pocket-lock-inner">
+      <div class="pocket-lock-dist" id="pocket-lock-distance">—</div>
+      <div class="pocket-lock-sub" id="pocket-lock-hole">Shot mode</div>
+      <div class="pocket-lock-title">Pocket lock</div>
+      <div class="pocket-swipe" id="pocket-swipe" aria-label="Swipe to unlock">
+        <span class="pocket-swipe-text">Swipe to unlock</span>
+        <div class="pocket-swipe-knob" id="pocket-swipe-knob">→</div>
       </div>
     </div>
   </div>
@@ -793,10 +892,17 @@ function loadSettings() {
       autoMark: !!s.autoMark,
       markSound: s.markSound !== false,
       showWalkTrack: s.showWalkTrack !== false,
-      theme: s.theme === "light" ? "light" : "dark"
+      theme: s.theme === "light" ? "light" : "dark",
+      pocketLockAuto: s.pocketLockAuto !== false
     };
   } catch (e) {
-    return { autoMark: false, markSound: true, showWalkTrack: true, theme: "dark" };
+    return {
+      autoMark: false,
+      markSound: true,
+      showWalkTrack: true,
+      theme: "dark",
+      pocketLockAuto: true
+    };
   }
 }
 
@@ -909,6 +1015,8 @@ function saveData() {
 }
 
 function showScreen(id) {
+  if (id !== "play" && pocketLocked) unlockPocketLock();
+  if (id !== "play") clearPocketLockIdle();
   document.querySelectorAll(".screen").forEach(s => s.classList.remove("active"));
   document.getElementById("screen-" + id).classList.add("active");
   if (id === "home") renderHome();
@@ -919,6 +1027,7 @@ function showScreen(id) {
     document.getElementById("course-holes").value = "18";
     renderParInputs();
   }
+  if (id === "play") schedulePocketLockIdle();
 }
 
 function closeModal() {
@@ -940,11 +1049,13 @@ function updateLiveDistance() {
 
   if (document.getElementById("modal-confirm").classList.contains("active") && pendingDistance > 0) {
     el.textContent = Math.round(pendingDistance) + " m";
+    syncPocketLockDistance(el.textContent);
     return;
   }
 
   if (isTeeingOff || !anchorPosition || !currentPosition) {
     el.textContent = "—";
+    syncPocketLockDistance("—");
     return;
   }
 
@@ -953,6 +1064,7 @@ function updateLiveDistance() {
     currentPosition.lat, currentPosition.lon
   );
   el.textContent = Math.round(dist) + " m";
+  syncPocketLockDistance(el.textContent);
 
   if (document.getElementById("modal-tee").classList.contains("active")) {
     updateToHoleDisplay("tee-to-hole", currentPosition);
@@ -1322,6 +1434,12 @@ function updatePlayUI() {
     btnOut.style.display = "block";
   }
 
+  const lockBtn = document.getElementById("btn-pocket-lock");
+  if (lockBtn) {
+    lockBtn.style.display = (!isTeeingOff && currentRound) ? "block" : "none";
+  }
+  schedulePocketLockIdle();
+
   const clubEl = document.getElementById("current-club-display");
   if (clubEl) {
     if (isTeeingOff) clubEl.textContent = "";
@@ -1487,6 +1605,7 @@ function confirmShot() {
 }
 
 function advanceAfterHoleOut() {
+  unlockPocketLock();
   stopAutoMarkWatch();
   if (currentHoleIndex < currentRound.holes.length - 1) {
     currentHoleIndex++;
@@ -1579,6 +1698,8 @@ function showSummary() {
 }
 
 function saveRoundAndHome() {
+  unlockPocketLock();
+  clearPocketLockIdle();
   if (currentRound) {
     currentRound.partial = false;
     currentRound.completed = true;
@@ -1608,6 +1729,8 @@ function upsertRound(round) {
 }
 
 function exitRoundAndSave() {
+  unlockPocketLock();
+  clearPocketLockIdle();
   stopAutoMarkWatch();
   stopGPS();
   if (currentRound && roundHasProgress(currentRound)) {
@@ -1622,12 +1745,14 @@ function exitRoundAndSave() {
 }
 
 function confirmExitRound() {
+  if (pocketLocked) unlockPocketLock();
   if (!currentRound) {
     showScreen("home");
     return;
   }
   if (!roundHasProgress(currentRound)) {
     if (confirm("Leave this round? Nothing to save yet.")) {
+      clearPocketLockIdle();
       stopAutoMarkWatch();
       stopGPS();
       currentRound = null;
@@ -1678,6 +1803,10 @@ function closeTopModal() {
 }
 
 function onHardwareBack() {
+  if (pocketLocked) {
+    unlockPocketLock();
+    return;
+  }
   if (closeTopModal()) return;
 
   const screen = getActiveScreenId();
@@ -2926,10 +3055,12 @@ function bindMapGestures() {
 function renderSettings() {
   const light = document.getElementById("setting-light-mode");
   const walk = document.getElementById("setting-walk-track");
+  const pocket = document.getElementById("setting-pocket-lock");
   const am = document.getElementById("setting-auto-mark");
   const snd = document.getElementById("setting-mark-sound");
   if (light) light.checked = settings.theme === "light";
   if (walk) walk.checked = !!settings.showWalkTrack;
+  if (pocket) pocket.checked = !!settings.pocketLockAuto;
   if (am) am.checked = !!settings.autoMark;
   if (snd) {
     snd.checked = !!settings.markSound;
@@ -2953,6 +3084,154 @@ function onWalkTrackToggle(on) {
   }
   showToast(on ? "Walking track on" : "Walking track hidden");
 }
+
+function onPocketLockAutoToggle(on) {
+  settings.pocketLockAuto = !!on;
+  saveSettings();
+  if (!on) clearPocketLockIdle();
+  else schedulePocketLockIdle();
+  showToast(on ? "Auto pocket lock on" : "Auto pocket lock off");
+}
+
+// ---------- Pocket lock ----------
+let pocketLocked = false;
+let pocketIdleTimer = null;
+let pocketSwipeBound = false;
+let pocketSwipeStartX = 0;
+let pocketSwipeOrigin = 0;
+let pocketSwipeMax = 0;
+const POCKET_IDLE_MS = 20000;
+
+function syncPocketLockDistance(text) {
+  const el = document.getElementById("pocket-lock-distance");
+  if (el) el.textContent = text || "—";
+}
+
+function anyPlayModalOpen() {
+  return !!document.querySelector(".modal.active");
+}
+
+function clearPocketLockIdle() {
+  if (pocketIdleTimer) {
+    clearTimeout(pocketIdleTimer);
+    pocketIdleTimer = null;
+  }
+}
+
+function schedulePocketLockIdle() {
+  clearPocketLockIdle();
+  if (!settings.pocketLockAuto || pocketLocked) return;
+  if (!currentRound || isTeeingOff) return;
+  if (getActiveScreenId() !== "play") return;
+  if (anyPlayModalOpen()) return;
+  pocketIdleTimer = setTimeout(() => {
+    if (!settings.pocketLockAuto || pocketLocked) return;
+    if (!currentRound || isTeeingOff) return;
+    if (getActiveScreenId() !== "play") return;
+    if (anyPlayModalOpen()) return;
+    engagePocketLock();
+  }, POCKET_IDLE_MS);
+}
+
+function engagePocketLock() {
+  if (pocketLocked) return;
+  if (!currentRound || getActiveScreenId() !== "play") return;
+  if (isTeeingOff) {
+    showToast("Lock is for shot mode after tee off");
+    return;
+  }
+  clearPocketLockIdle();
+  pocketLocked = true;
+  const live = document.getElementById("live-distance");
+  syncPocketLockDistance(live ? live.textContent : "—");
+  const hole = currentRound.holes[currentHoleIndex];
+  const sub = document.getElementById("pocket-lock-hole");
+  if (sub && hole) {
+    sub.textContent = `Hole ${hole.holeNumber} · swipe when ready to mark`;
+  }
+  const overlay = document.getElementById("pocket-lock");
+  overlay.classList.add("show");
+  overlay.setAttribute("aria-hidden", "false");
+  resetPocketSwipeKnob();
+  bindPocketSwipe();
+}
+
+function unlockPocketLock() {
+  if (!pocketLocked) return;
+  pocketLocked = false;
+  const overlay = document.getElementById("pocket-lock");
+  overlay.classList.remove("show");
+  overlay.setAttribute("aria-hidden", "true");
+  resetPocketSwipeKnob();
+  schedulePocketLockIdle();
+}
+
+function resetPocketSwipeKnob() {
+  const knob = document.getElementById("pocket-swipe-knob");
+  if (knob) knob.style.transform = "translateX(0px)";
+}
+
+function bindPocketSwipe() {
+  if (pocketSwipeBound) return;
+  pocketSwipeBound = true;
+  const track = document.getElementById("pocket-swipe");
+  const knob = document.getElementById("pocket-swipe-knob");
+  if (!track || !knob) return;
+
+  function maxTravel() {
+    return Math.max(0, track.clientWidth - knob.offsetWidth - 8);
+  }
+
+  function onStart(clientX) {
+    pocketSwipeStartX = clientX;
+    pocketSwipeOrigin = 0;
+    const m = knob.style.transform.match(/translateX\((-?\d+(?:\.\d+)?)px\)/);
+    if (m) pocketSwipeOrigin = parseFloat(m[1]) || 0;
+    pocketSwipeMax = maxTravel();
+  }
+
+  function onMove(clientX) {
+    if (!pocketLocked) return;
+    const dx = clientX - pocketSwipeStartX;
+    let x = Math.max(0, Math.min(pocketSwipeMax, pocketSwipeOrigin + dx));
+    knob.style.transform = `translateX(${x}px)`;
+    if (x >= pocketSwipeMax * 0.78) {
+      unlockPocketLock();
+    }
+  }
+
+  function onEnd() {
+    if (!pocketLocked) return;
+    resetPocketSwipeKnob();
+  }
+
+  track.addEventListener("pointerdown", e => {
+    if (!pocketLocked) return;
+    e.preventDefault();
+    track.setPointerCapture?.(e.pointerId);
+    onStart(e.clientX);
+  }, { passive: false });
+
+  track.addEventListener("pointermove", e => {
+    if (!pocketLocked) return;
+    if (e.buttons === 0 && e.pointerType === "mouse") return;
+    onMove(e.clientX);
+  }, { passive: true });
+
+  track.addEventListener("pointerup", onEnd);
+  track.addEventListener("pointercancel", onEnd);
+
+  // Block other taps on overlay from doing anything
+  document.getElementById("pocket-lock").addEventListener("click", e => {
+    e.preventDefault();
+    e.stopPropagation();
+  }, true);
+}
+
+document.addEventListener("pointerdown", () => {
+  if (pocketLocked) return;
+  if (getActiveScreenId() === "play") schedulePocketLockIdle();
+}, { passive: true });
 
 const WALK_MIN_M = 4;
 const WALK_MAX_POINTS = 400;
