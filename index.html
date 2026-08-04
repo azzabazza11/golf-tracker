@@ -275,6 +275,22 @@
       color: #000;
       border-color: var(--accent);
     }
+    .map-toolbar .map-toggle {
+      background: #fff;
+      color: #1a2332;
+      border: 1px solid var(--border);
+    }
+    .map-toolbar .map-toggle.on {
+      background: #3498db;
+      color: #fff;
+      border-color: #3498db;
+    }
+    #map-toolbar-photo {
+      justify-content: flex-start;
+    }
+    #btn-map-walk-track {
+      margin-left: auto;
+    }
     #map-image-scope.modal .modal-content { max-height: 40vh; }
     #map-canvas-wrap {
       flex: 1;
@@ -608,16 +624,6 @@
       </div>
       <div class="setting-row">
         <div class="setting-text">
-          <strong>Show walking track</strong>
-          <span>Little blue dots on the hole map from your GPS path while playing.</span>
-        </div>
-        <label class="switch">
-          <input type="checkbox" id="setting-walk-track" onchange="onWalkTrackToggle(this.checked)">
-          <span class="slider"></span>
-        </label>
-      </div>
-      <div class="setting-row">
-        <div class="setting-text">
           <strong>Auto screen lock</strong>
           <span>In shot mode, lock after a short idle so pocket taps do nothing. Swipe to unlock. Default on.</span>
         </div>
@@ -861,7 +867,10 @@
           <input type="file" id="map-file-unified" accept="image/*" onchange="onMapPhotoPicked(event)">
         </label>
         <button type="button" class="btn-secondary" id="btn-map-manual" onclick="toggleManualAlign(true)">Manual align</button>
+      </div>
+      <div class="map-toolbar" id="map-toolbar-photo">
         <button type="button" class="btn-danger" onclick="mapClearPhoto()">Clear photo</button>
+        <button type="button" class="map-toggle" id="btn-map-walk-track" onclick="toggleWalkTrack()">Walk track</button>
       </div>
       <div class="map-toolbar" id="map-manual-row">
         <button type="button" class="btn-primary" id="btn-map-lock" onclick="toggleMapLock()">Lock to photo</button>
@@ -918,7 +927,7 @@
   </div>
 
 <script>
-const APP_VERSION = "1.3.0";
+const APP_VERSION = "1.3.1";
 const CLUBS = ["Dr","3w","5w","Hybrid","3i","4i","5i","6i","7i","8i","9i","PW","GW","SW","LW","Putter"];
 const PIN_ACCEPT_M = 10;
 const PIN_LOCK_M = 5;
@@ -2688,6 +2697,7 @@ async function openMapSession(session) {
   bindMapGestures();
   updateMapLockUI();
   updateMapHoleNavButtons();
+  updateMapWalkTrackButton();
   await ensureCourseDefaultPhoto(session.courseId, session.course.holes.length);
   await loadMapImageForSession();
   requestAnimationFrame(() => {
@@ -3489,12 +3499,10 @@ function bindMapGestures() {
 // ---------- Settings + auto-mark + club edit ----------
 function renderSettings() {
   const light = document.getElementById("setting-light-mode");
-  const walk = document.getElementById("setting-walk-track");
   const pocket = document.getElementById("setting-pocket-lock");
   const am = document.getElementById("setting-auto-mark");
   const snd = document.getElementById("setting-mark-sound");
   if (light) light.checked = settings.theme === "light";
-  if (walk) walk.checked = !!settings.showWalkTrack;
   if (pocket) pocket.checked = !!settings.pocketLockAuto;
   if (am) am.checked = !!settings.autoMark;
   if (snd) {
@@ -3511,13 +3519,21 @@ function onLightModeToggle(on) {
   applyTheme();
 }
 
-function onWalkTrackToggle(on) {
-  settings.showWalkTrack = !!on;
+function updateMapWalkTrackButton() {
+  const btn = document.getElementById("btn-map-walk-track");
+  if (!btn) return;
+  btn.classList.toggle("on", !!settings.showWalkTrack);
+  btn.setAttribute("aria-pressed", settings.showWalkTrack ? "true" : "false");
+  btn.textContent = settings.showWalkTrack ? "Walk track on" : "Walk track";
+}
+
+function toggleWalkTrack() {
+  settings.showWalkTrack = !settings.showWalkTrack;
   saveSettings();
+  updateMapWalkTrackButton();
   if (document.getElementById("modal-map")?.classList.contains("active")) {
     drawHoleMap();
   }
-  showToast(on ? "Walking track on" : "Walking track hidden");
 }
 
 function onPocketLockAutoToggle(on) {
