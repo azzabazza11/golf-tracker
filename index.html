@@ -798,15 +798,34 @@
       animation: splashPop 0.55s cubic-bezier(0.2, 1.4, 0.4, 1) both;
     }
     .splash-ball {
-      width: 56px;
-      height: 56px;
+      width: 58px;
+      height: 58px;
       margin: 0 auto 18px;
       border-radius: 50%;
       background:
-        radial-gradient(circle at 32% 28%, #fff 0 8%, transparent 9%),
-        radial-gradient(circle at 50% 50%, #f5f5f5 0%, #d0d0d0 55%, #9a9a9a 100%);
-      box-shadow: 0 10px 28px rgba(0,0,0,0.45);
+        radial-gradient(circle at 30% 28%, rgba(255,255,255,0.95) 0 9%, rgba(255,255,255,0.15) 10%, transparent 24%),
+        radial-gradient(circle at 20% 20%, rgba(255,255,255,0.9) 0 7%, transparent 8%),
+        radial-gradient(circle at 50% 50%, #fbfbfb 0%, #ececec 58%, #c9c9c9 83%, #9f9f9f 100%);
+      background-blend-mode: screen, normal, normal;
+      box-shadow:
+        inset -6px -8px 12px rgba(0,0,0,0.16),
+        inset 8px 10px 14px rgba(255,255,255,0.75),
+        0 12px 28px rgba(0,0,0,0.42);
+      position: relative;
+      overflow: hidden;
       animation: splashBounce 0.7s ease-out both;
+    }
+    .splash-ball::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      border-radius: 50%;
+      background:
+        radial-gradient(circle at 10px 10px, rgba(0,0,0,0.12) 0 1.6px, transparent 1.8px) 0 0 / 12px 12px,
+        radial-gradient(circle at 16px 16px, rgba(0,0,0,0.10) 0 1.5px, transparent 1.7px) 0 0 / 12px 12px;
+      opacity: 0.34;
+      mix-blend-mode: multiply;
+      pointer-events: none;
     }
     .splash-title {
       font-size: 34px;
@@ -957,9 +976,9 @@
     </div>
 
     <div class="card">
-      <h3 style="margin-bottom:8px">Share</h3>
+      <h3 style="margin-bottom:8px">Share / Feedback</h3>
       <p class="modal-note" style="margin-bottom:12px">Show the QR for the live GitHub Pages app (keeps your data on this device).</p>
-      <button type="button" class="btn-primary" style="width:100%" onclick="openShareQrModal()">Share QR</button>
+      <button type="button" class="btn-primary" style="width:100%" onclick="openShareQrModal()">Share QR / Feedback</button>
     </div>
 
     <div class="card">
@@ -1024,10 +1043,14 @@
         height="240"
         style="width:min(240px,70vw);height:auto;border-radius:12px;background:#fff;padding:10px"
       >
+      <p class="modal-note" style="margin-top:12px;margin-bottom:12px">
+        Feedback opens your email app so you can send thoughts, bugs, or ideas directly. Any details you include are shared by you voluntarily.
+      </p>
       <div class="row" style="margin-top:16px">
         <button type="button" class="btn-secondary" onclick="closeModal()">Close</button>
         <button type="button" class="btn-primary" onclick="shareAppLink()">Share link</button>
       </div>
+      <button type="button" class="btn-secondary" style="width:100%;margin-top:10px" onclick="openFeedbackEmail()">Send feedback</button>
     </div>
   </div>
 
@@ -1322,8 +1345,9 @@
   </div>
 
 <script>
-const APP_VERSION = "1.4.13";
+const APP_VERSION = "1.4.15";
 const PAGES_URL = "https://azzabazza11.github.io/golf-tracker/";
+const FEEDBACK_EMAIL = "aaron.callinan@gmail.com";
 const SUPPORT_URL = "https://ko-fi.com/aaroncallinan";
 const CLUBS = ["Dr","3w","5w","Hybrid","3i","4i","5i","6i","7i","8i","9i","PW","GW","SW","LW","Putter"];
 const PIN_ACCEPT_M = 10;
@@ -4847,6 +4871,24 @@ async function shareAppLink() {
   }
 }
 
+function openFeedbackEmail() {
+  const subject = encodeURIComponent("Shot Tracker feedback");
+  const body = encodeURIComponent(
+    [
+      "Hi Aaron,",
+      "",
+      "Feedback:",
+      "",
+      "",
+      "---",
+      "App version: " + APP_VERSION,
+      "Page: " + appShareUrl(),
+      "Browser: " + (navigator.userAgent || "unknown")
+    ].join("\n")
+  );
+  location.href = `mailto:${FEEDBACK_EMAIL}?subject=${subject}&body=${body}`;
+}
+
 function openSupportLink() {
   if (!SUPPORT_URL) return;
   window.open(SUPPORT_URL, "_blank", "noopener,noreferrer");
@@ -5886,7 +5928,10 @@ function playSplashJingle() {
     if (!Ctx) return false;
     const ctx = audioCtx || new Ctx();
     audioCtx = ctx;
-    if (ctx.state === "suspended") ctx.resume();
+    if (ctx.state === "suspended") {
+      try { ctx.resume(); } catch (_) {}
+    }
+    if (ctx.state !== "running") return false;
     // Tiny original sting — snappy charge vibe (not a copyrighted tune)
     const notes = [
       { f: 392.0, t: 0.00, d: 0.09 },
@@ -5931,8 +5976,9 @@ function runSplash() {
   playSplashJingle();
   // If autoplay was blocked, first tap unlocks audio (splash click also dismisses)
   const unlock = () => {
-    playSplashJingle();
-    document.removeEventListener("pointerdown", unlock, true);
+    if (playSplashJingle()) {
+      document.removeEventListener("pointerdown", unlock, true);
+    }
   };
   document.addEventListener("pointerdown", unlock, true);
   setTimeout(() => dismissSplash(false), 1700);
