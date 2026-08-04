@@ -940,7 +940,7 @@
   </div>
 
 <script>
-const APP_VERSION = "1.3.2";
+const APP_VERSION = "1.3.3";
 const CLUBS = ["Dr","3w","5w","Hybrid","3i","4i","5i","6i","7i","8i","9i","PW","GW","SW","LW","Putter"];
 const PIN_ACCEPT_M = 10;
 const PIN_LOCK_M = 5;
@@ -2901,11 +2901,16 @@ function updateMapStatusLine() {
       ? "Hole photo"
       : "No photo";
   if (calib && calib.tee && calib.pin) {
-    el.textContent = `${photoBit} · calibrated (Set tee/pin or Manual align to refine)`;
+    const hole = mapSession.roundHole;
+    if (hole?.teePosition && h.pin) {
+      el.textContent = `${photoBit} · calibrated (Set tee/pin or Manual align to refine)`;
+    } else {
+      el.textContent = `${photoBit} · photo tee/pin set — Tee Off & Hole Out later to finish GPS align`;
+    }
   } else if (!mapImage) {
-    el.textContent = "Add Image, then Set tee & Set pin on the photo to place shots.";
+    el.textContent = "Add Image, then Set tee & Set pin on the photo (GPS not required yet).";
   } else {
-    el.textContent = `${photoBit} · Set tee & Set pin on the photo to calibrate`;
+    el.textContent = `${photoBit} · Set tee & Set pin on the photo (can do before Tee Off)`;
   }
 }
 
@@ -3050,26 +3055,18 @@ function startMapTapMode(kind) {
     showToast("Add an Image first");
     return;
   }
-  const hole = mapSession.roundHole;
-  const courseHole = ensureCourseHole(mapSession.holeIndex, mapSession.course);
-  if (!hole.teePosition) {
-    showToast("Need a GPS tee — Tee Off on this hole first");
-    return;
-  }
-  if (!courseHole || !courseHole.pin) {
-    showToast("Need a GPS pin — Hole Out at the cup to mark it first");
-    return;
-  }
+  // Photo taps can be set before GPS — alignment completes once tee GPS + pin GPS exist
   mapManualAlign = false;
   mapTapMode = kind;
   updateMapLockUI();
 }
 
 function handleMapCalibTap(sx, sy) {
-  if (!mapTapMode || !mapSession || !mapFit) return false;
+  if (!mapTapMode || !mapSession) return false;
   const wrap = document.getElementById("map-canvas-wrap");
   const cssW = wrap.clientWidth;
   const cssH = Math.max(wrap.clientHeight, 240);
+  if (!mapFit) mapFit = computeMapFit([], cssW, cssH);
   const view = getMapView();
   const fitPt = screenToFit(sx, sy, view, cssW, cssH);
   const align = getMapAlign();
@@ -3090,15 +3087,27 @@ function handleMapCalibTap(sx, sy) {
       persistMapAlign();
       showToast("Calibrated — shots mapped to tee & pin");
     } else {
-      showToast("Could not calibrate — try tapping again");
+      persistMapAlign();
+      showToast("Photo tee & pin saved — Tee Off / Hole Out later to finish GPS align");
     }
   } else {
     persistMapAlign();
-    showToast(kind === "tee" ? "Tee set — now Set pin" : "Pin set — now Set tee");
+    showToast(kind === "tee" ? "Tee marked on photo — now Set pin" : "Pin marked on photo — now Set tee");
   }
   updateMapLockUI();
   drawHoleMap();
   return true;
+}
+
+function photoLocalToCanvas(local, align, cssW, cssH) {
+  if (!local) return null;
+  const s = align.scale || 1;
+  let x = local.x * s;
+  let y = local.y * s;
+  const r = (align.rotation || 0) * Math.PI / 180;
+  const xr = x * Math.cos(r) - y * Math.sin(r);
+  const yr = x * Math.sin(r) + y * Math.cos(r);
+  return { x: xr + cssW / 2 + (align.offsetX || 0), y: yr + cssH / 2 + (align.offsetY || 0) };
 }
 
 function resizeMapCanvas() {
@@ -3172,10 +3181,51 @@ function drawHoleMap() {
   mapGeoOrigin = origin || null;
   const youLeg = document.getElementById("map-leg-you");
   if (youLeg) youLeg.style.display = youPos ? "" : "none";
+
+  // Setup / no GPS yet: still show photo and allow Set tee / Set pin markers
   if (!origin) {
-    ctx.fillStyle = "#95a5a6";
-    ctx.font = "14px sans-serif";
-    ctx.fillText("No GPS points yet", 20, 40);
+    mapFit = computeMapFit([], cssW, cssH);
+    const align = getMapAlign();
+    const view = getMapView();
+    ctx.save();
+    ctx.translate(cssW / 2 + view.offsetX, cssH / 2 + view.offsetY);
+    ctx.rotate(view.rotation * Math.PI / 180);
+    ctx.scale(view.scale, view.scale);
+    ctx.translate(-cssW / 2, -cssH / 2);
+    if (mapImage) {
+      ctx.save();
+      ctx.translate(cssW / 2 + align.offsetX, cssH / 2 + align.offsetY);
+      ctx.rotate(align.rotation * Math.PI / 180);
+      ctx.scale(align.scale, align.scale);
+      const iw = mapImage.naturalWidth;
+      const ih = mapImage.naturalHeight;
+      const cover = Math.max(cssW / iw, cssH / ih);
+      ctx.globalAlpha = 0.92;
+      ctx.drawImage(mapImage, -iw * cover / 2, -ih * cover / 2, iw * cover, ih * cover);
+      ctx.restore();
+    } else {
+      ctx.fillStyle = "#1a2332";
+      ctx.fillRect(0, 0, cssW, cssH);
+      ctx.fillStyle = "#95a5a6";
+      ctx.font = "13px sans-serif";
+      ctx.fillText("Add a course photo, then Set tee & Set pin on the image", 16, 28);
+    }
+    const calib = courseHole && courseHole.photoCalib;
+    function drawCalibLocal(local, color) {
+      const p = photoLocalToCanvas(local, align, cssW, cssH);
+      if (!p) return;
+      const rr = 9 / Math.max(view.scale, 0.01);
+      ctx.beginPath();
+      ctx.fillStyle = color;
+      ctx.strokeStyle = "rgba(0,0,0,0.55)";
+      ctx.lineWidth = 2 / Math.max(view.scale, 0.01);
+      ctx.arc(p.x, p.y, rr, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
+    if (calib?.tee) drawCalibLocal(calib.tee, "#ffffff");
+    if (calib?.pin) drawCalibLocal(calib.pin, "#2ecc71");
+    ctx.restore();
     return;
   }
 
