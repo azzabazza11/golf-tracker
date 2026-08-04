@@ -963,7 +963,7 @@
   </div>
 
 <script>
-const APP_VERSION = "1.3.4";
+const APP_VERSION = "1.3.5";
 /** Bump when localStorage shape breaks older builds. */
 const STORAGE_SCHEMA = 1;
 const PAGES_URL = "https://azzabazza11.github.io/golf-tracker/";
@@ -2295,14 +2295,24 @@ function reviewRound(id, opts) {
       : "";
   }
 
+  const prevDisabled = !game || game.n <= 1;
+  const nextDisabled = !game || game.n >= game.total;
   let html = `
-    <div class="card" data-review-chrome="1">
-      <div style="font-weight:600;font-size:18px">${course ? escapeHtml(course.name) : "Unknown"}</div>
-      <div style="color:var(--muted);font-size:13px;margin-top:4px">${new Date(round.date).toLocaleString()}</div>
-      <div style="color:var(--accent);font-size:14px;font-weight:600;margin-top:8px">
-        ${game ? `Game ${game.n} of ${game.total}` : "Game —"}${isPartialRound(round) ? " · partial" : ""}
+    <div class="card" id="review-game-card" data-review-chrome="1">
+      <div style="display:flex;align-items:center;gap:8px">
+        <button type="button" class="btn-secondary" style="padding:10px 12px;flex-shrink:0"
+          onclick="stepReviewRound(-1)" ${prevDisabled ? "disabled" : ""} aria-label="Previous game">←</button>
+        <div style="flex:1;min-width:0;text-align:center">
+          <div style="font-weight:600;font-size:18px">${course ? escapeHtml(course.name) : "Unknown"}</div>
+          <div style="color:var(--muted);font-size:13px;margin-top:4px">${new Date(round.date).toLocaleString()}</div>
+          <div style="color:var(--accent);font-size:14px;font-weight:600;margin-top:8px">
+            ${game ? `Game ${game.n} of ${game.total}` : "Game —"}${isPartialRound(round) ? " · partial" : ""}
+          </div>
+        </div>
+        <button type="button" class="btn-secondary" style="padding:10px 12px;flex-shrink:0"
+          onclick="stepReviewRound(1)" ${nextDisabled ? "disabled" : ""} aria-label="Next game">→</button>
       </div>
-      <p class="modal-note" style="margin-top:8px">Swipe sideways for other games at this course. Tap a hole title for history.</p>
+      <p class="modal-note" style="margin-top:10px;text-align:center">Swipe this card or use arrows for other games. Tap a hole title for history.</p>
       ${isPartialRound(round)
         ? `<button class="btn-primary" style="width:100%;margin-top:12px" onclick="resumePartialRound('${round.id}')">Continue Round</button>`
         : ""}
@@ -2349,56 +2359,48 @@ function reviewRound(id, opts) {
     content.classList.add("review-slide-from-right");
   }
   window._reviewRoundId = id;
-  bindReviewSwipe();
+  bindReviewGameCardSwipe();
   showScreen("review");
 }
 
-let reviewSwipeBound = false;
-let reviewSwipeX0 = 0;
-let reviewSwipeY0 = 0;
-let reviewSwipeActive = false;
-let reviewSwipeIgnore = false;
+function stepReviewRound(delta) {
+  const round = rounds.find(r => r.id === window._reviewRoundId);
+  if (!round) return;
+  const nextId = neighborRoundId(round, delta);
+  if (!nextId) {
+    showToast(delta < 0 ? "First game" : "Latest game");
+    return;
+  }
+  reviewRound(nextId, { animate: delta > 0 ? "from-left" : "from-right" });
+}
 
-function bindReviewSwipe() {
-  if (reviewSwipeBound) return;
-  reviewSwipeBound = true;
-  const root = document.getElementById("screen-review");
-  if (!root) return;
+let reviewCardSwipe = { x0: 0, y0: 0, active: false };
 
-  root.addEventListener("pointerdown", e => {
-    if (getActiveScreenId() !== "review") return;
-    const t = e.target;
-    if (t.closest(".shot-list li") || t.closest("button") || t.closest("a")) {
-      reviewSwipeIgnore = true;
-      return;
-    }
-    reviewSwipeIgnore = false;
-    reviewSwipeActive = true;
-    reviewSwipeX0 = e.clientX;
-    reviewSwipeY0 = e.clientY;
+function bindReviewGameCardSwipe() {
+  const card = document.getElementById("review-game-card");
+  if (!card || card.dataset.swipeBound === "1") return;
+  card.dataset.swipeBound = "1";
+
+  card.addEventListener("pointerdown", e => {
+    if (e.target.closest("button")) return;
+    reviewCardSwipe.active = true;
+    reviewCardSwipe.x0 = e.clientX;
+    reviewCardSwipe.y0 = e.clientY;
+    try { card.setPointerCapture(e.pointerId); } catch (_) {}
   }, { passive: true });
 
-  root.addEventListener("pointerup", e => {
-    if (!reviewSwipeActive || reviewSwipeIgnore) {
-      reviewSwipeActive = false;
-      return;
-    }
-    reviewSwipeActive = false;
-    const dx = e.clientX - reviewSwipeX0;
-    const dy = e.clientY - reviewSwipeY0;
-    if (Math.abs(dx) < 70 || Math.abs(dx) < Math.abs(dy) * 1.2) return;
-    const round = rounds.find(r => r.id === window._reviewRoundId);
-    if (!round) return;
-    // swipe right → subsequent (higher game) from left; swipe left → previous from right
-    if (dx > 0) {
-      const nextId = neighborRoundId(round, 1);
-      if (!nextId) { showToast("Latest game"); return; }
-      reviewRound(nextId, { animate: "from-left" });
-    } else {
-      const prevId = neighborRoundId(round, -1);
-      if (!prevId) { showToast("First game"); return; }
-      reviewRound(prevId, { animate: "from-right" });
-    }
+  card.addEventListener("pointerup", e => {
+    if (!reviewCardSwipe.active) return;
+    reviewCardSwipe.active = false;
+    const dx = e.clientX - reviewCardSwipe.x0;
+    const dy = e.clientY - reviewCardSwipe.y0;
+    if (Math.abs(dx) < 56 || Math.abs(dx) < Math.abs(dy) * 1.15) return;
+    // swipe right → next game; swipe left → previous
+    stepReviewRound(dx > 0 ? 1 : -1);
+  }, { passive: true });
+
+  card.addEventListener("pointercancel", () => {
+    reviewCardSwipe.active = false;
   }, { passive: true });
 }
 
@@ -3701,19 +3703,29 @@ function openSelectedOldVersion() {
     showToast("That version is not compatible with current data");
     return;
   }
-  const path = `archive/${encodeURIComponent(ver)}/index.html`;
+  const path = siteRootPath() + "archive/" + encodeURIComponent(ver) + "/index.html";
   if (!confirm(`Open v${ver}?\n\nUses the same saved courses/rounds on this device.`)) return;
   location.href = path;
+}
+
+function siteRootPath() {
+  let p = location.pathname || "/";
+  p = p.replace(/\/archive\/[^/]+\/index\.html$/i, "/");
+  p = p.replace(/\/index\.html$/i, "/");
+  if (!p.endsWith("/")) {
+    const i = p.lastIndexOf("/");
+    p = i >= 0 ? p.slice(0, i + 1) : "/";
+  }
+  return p;
 }
 
 function appShareUrl() {
   try {
     if (location.protocol === "http:" || location.protocol === "https:") {
-      // Prefer clean Pages URL when on github.io; else current origin+path
       if (/github\.io$/i.test(location.hostname)) {
-        return location.origin + location.pathname.replace(/archive\/[^/]+\/index\.html$/i, "").replace(/index\.html$/i, "");
+        return location.origin + siteRootPath();
       }
-      return location.href.split("#")[0].replace(/archive\/[^/]+\/index\.html$/i, "index.html");
+      return location.origin + siteRootPath();
     }
   } catch (e) { /* ignore */ }
   return PAGES_URL;
