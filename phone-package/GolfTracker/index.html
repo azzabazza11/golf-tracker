@@ -3,6 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <meta name="theme-color" content="#0f1419">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="app-icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="app-icon.svg">
   <title>Golf Shot Tracker</title>
   <style>
     :root, html[data-theme="dark"] {
@@ -1058,6 +1062,7 @@
         <button type="button" class="btn-secondary" onclick="closeModal()">Close</button>
         <button type="button" class="btn-primary" onclick="shareAppLink()">Share link</button>
       </div>
+      <button type="button" class="btn-primary" style="width:100%;margin-top:10px" id="btn-install-app" onclick="promptInstallApp()">Install app</button>
       <button type="button" class="btn-secondary" style="width:100%;margin-top:10px" onclick="openFeedbackEmail()">Send feedback</button>
     </div>
   </div>
@@ -1353,10 +1358,11 @@
   </div>
 
 <script>
-const APP_VERSION = "1.4.16";
+const APP_VERSION = "1.4.17";
 const PAGES_URL = "https://azzabazza11.github.io/golf-tracker/";
 const FEEDBACK_EMAIL = "aaron.callinan@gmail.com";
 const SUPPORT_URL = "https://ko-fi.com/aaroncallinan";
+const INSTALL_HINT_IOS = "On iPhone: tap Share, then Add to Home Screen.";
 const CLUBS = ["Dr","3w","5w","Hybrid","3i","4i","5i","6i","7i","8i","9i","PW","GW","SW","LW","Putter"];
 const PIN_ACCEPT_M = 10;
 const PIN_LOCK_M = 5;
@@ -4854,10 +4860,35 @@ function appShareUrl() {
   return PAGES_URL;
 }
 
+function isIosLike() {
+  const ua = navigator.userAgent || "";
+  return /iPhone|iPad|iPod/i.test(ua);
+}
+
+function isStandaloneDisplay() {
+  return window.matchMedia?.("(display-mode: standalone)")?.matches || window.navigator.standalone === true;
+}
+
+function updateInstallButton() {
+  const btn = document.getElementById("btn-install-app");
+  if (!btn) return;
+  if (isStandaloneDisplay()) {
+    btn.style.display = "none";
+    return;
+  }
+  btn.style.display = "";
+  btn.textContent = deferredInstallPrompt
+    ? "Install app"
+    : isIosLike()
+      ? "Add to Home Screen"
+      : "Install app";
+}
+
 function openShareQrModal() {
   const label = document.getElementById("share-qr-url-label");
   if (label) label.textContent = appShareUrl();
   document.getElementById("modal-share-qr").classList.add("active");
+  updateInstallButton();
   recordTestEvent("share_qr");
 }
 
@@ -4895,6 +4926,21 @@ function openFeedbackEmail() {
     ].join("\n")
   );
   location.href = `mailto:${FEEDBACK_EMAIL}?subject=${subject}&body=${body}`;
+}
+
+async function promptInstallApp() {
+  if (isStandaloneDisplay()) {
+    showToast("Shot Tracker is already installed");
+    return;
+  }
+  if (deferredInstallPrompt) {
+    deferredInstallPrompt.prompt();
+    try { await deferredInstallPrompt.userChoice; } catch (_) {}
+    deferredInstallPrompt = null;
+    updateInstallButton();
+    return;
+  }
+  showToast(isIosLike() ? INSTALL_HINT_IOS : "Use your browser menu to install or add to home screen");
 }
 
 function openSupportLink() {
@@ -5928,6 +5974,7 @@ function maybeFinishHoleClubAssign(cancelled) {
 // Init
 let splashDone = false;
 let splashJingled = false;
+let deferredInstallPrompt = null;
 
 function playSplashJingle() {
   if (splashJingled) return true;
@@ -5996,6 +6043,20 @@ applyTheme();
 armBackTrap();
 bindStarBadgeGestures();
 renderHome();
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("./service-worker.js").catch(() => {});
+  });
+}
+window.addEventListener("beforeinstallprompt", e => {
+  e.preventDefault();
+  deferredInstallPrompt = e;
+  updateInstallButton();
+});
+window.addEventListener("appinstalled", () => {
+  deferredInstallPrompt = null;
+  updateInstallButton();
+});
 runSplash();
 </script>
 </body>

@@ -1,0 +1,18 @@
+{
+  "name": "Golf Shot Tracker",
+  "short_name": "Shot Tracker",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0f1419",
+  "theme_color": "#0f1419",
+  "description": "Simple on-course golf shot tracking with local-only storage.",
+  "icons": [
+    {
+      "src": "./app-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
