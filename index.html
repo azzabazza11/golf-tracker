@@ -1016,7 +1016,7 @@
   </div>
 
 <script>
-const APP_VERSION = "1.4.1";
+const APP_VERSION = "1.4.2";
 const PAGES_URL = "https://azzabazza11.github.io/golf-tracker/";
 const CLUBS = ["Dr","3w","5w","Hybrid","3i","4i","5i","6i","7i","8i","9i","PW","GW","SW","LW","Putter"];
 const PIN_ACCEPT_M = 10;
@@ -1518,18 +1518,52 @@ function renderCourses() {
   }
   el.innerHTML = courses.map(c => `
     <div class="card">
-      <div style="display:flex;justify-content:space-between;align-items:center">
-        <div>
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+        <div style="min-width:0">
           <div style="font-weight:600;font-size:18px">${escapeHtml(c.name)}</div>
           <div style="color:var(--muted);font-size:13px">${c.holes.length} holes</div>
         </div>
-        <div style="display:flex;gap:8px">
+        <div style="display:flex;gap:8px;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end">
           <button class="btn-danger" style="padding:10px 12px" onclick="deleteCourse('${c.id}')">✕</button>
+          <button class="btn-secondary" style="padding:10px 12px" onclick="openCourseMapFromManager('${c.id}')">Map</button>
           <button class="btn-primary" style="padding:10px 16px" onclick="startRound('${c.id}')">Play</button>
         </div>
       </div>
     </div>
   `).join("");
+}
+
+function buildCourseMapRound(course) {
+  return {
+    id: "course-map-" + course.id,
+    courseId: course.id,
+    holes: course.holes.map((h, i) => ({
+      holeNumber: i + 1,
+      par: h.par,
+      teePosition: knownTeeForHole(course.id, i, null),
+      shots: [],
+      walkTrack: []
+    }))
+  };
+}
+
+function openCourseMapFromManager(courseId) {
+  const course = courses.find(c => c.id === courseId);
+  if (!course || !course.holes?.length) {
+    showToast("Course not found");
+    return;
+  }
+  course.holes.forEach((_, i) => ensureCourseHole(i, course));
+  const mapRound = buildCourseMapRound(course);
+  openMapSession({
+    courseId: course.id,
+    holeIndex: 0,
+    roundHole: mapRound.holes[0],
+    course,
+    persistRounds: false,
+    mapRound,
+    returnScreen: "courses"
+  });
 }
 
 function deleteCourse(id) {
@@ -2874,6 +2908,7 @@ async function openMapSession(session) {
 
 function getMapSessionRound() {
   if (!mapSession) return null;
+  if (mapSession.mapRound) return mapSession.mapRound;
   if (currentRound && (!mapSession.roundId || currentRound.id === mapSession.roundId)) {
     return currentRound;
   }
@@ -2930,6 +2965,7 @@ async function mapStepHole(delta) {
 
 function closeMapModal() {
   persistMapAlign();
+  const returnScreen = mapSession && mapSession.returnScreen;
   document.getElementById("modal-map").classList.remove("active");
   document.getElementById("modal-map-image-scope")?.classList.remove("active");
   mapSession = null;
@@ -2945,6 +2981,10 @@ function closeMapModal() {
     mapImageUrl = null;
   }
   mapImage = null;
+  if (returnScreen) {
+    showScreen(returnScreen);
+    return;
+  }
   if (currentRound) updatePlayUI();
   if (document.getElementById("screen-review")?.classList.contains("active") && window._reviewRoundId) {
     reviewRound(window._reviewRoundId);
