@@ -690,6 +690,52 @@
     }
     .pocket-lock .am-countdown { margin: 4px 0 14px; }
 
+    .test-check-list {
+      list-style: none;
+      margin: 12px 0 0;
+      padding: 0;
+      text-align: left;
+      max-height: 55vh;
+      overflow-y: auto;
+    }
+    .test-check-list li {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--border);
+      font-size: 14px;
+      line-height: 1.35;
+    }
+    .test-check-list li:last-child { border-bottom: none; }
+    .test-check-list .box {
+      flex-shrink: 0;
+      width: 22px;
+      height: 22px;
+      border-radius: 6px;
+      border: 2px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      font-weight: 700;
+      margin-top: 1px;
+    }
+    .test-check-list li.done .box {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #000;
+    }
+    .test-check-list li.done .label { color: var(--muted); }
+    .test-check-list .meta {
+      display: block;
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 2px;
+    }
+    #test-mode-card { display: none; }
+    #test-mode-card.show { display: block; }
+
     .pocket-swipe {
       position: relative;
       height: 64px;
@@ -917,7 +963,7 @@
     </div>
 
     <div class="card">
-      <h3 style="margin-bottom:8px">About</h3>
+      <h3 style="margin-bottom:8px" id="about-heading" onclick="onAboutSecretTap()">About</h3>
       <p class="modal-note" style="margin-bottom:10px">
         Shot Tracker started as a way to keep score and distances on the course without accounts, ads, or sending your rounds to a server. GPS marks and maps stay on your phone.
       </p>
@@ -927,12 +973,36 @@
       <p class="modal-note" style="margin-bottom:14px">
         Shot Tracker is free to use and will stay free — no paywall, no subscription.
       </p>
-      <p class="modal-note" style="margin-bottom:10px">
-        If it helped your round and you want to say thanks, you can buy me a coffee.
-      </p>
-      <button type="button" class="btn-warning" style="width:100%" id="btn-buy-coffee" onclick="openBuyMeACoffee()" disabled>Buy me a coffee</button>
-      <p class="modal-note" style="margin-top:8px" id="buy-coffee-note">Link coming soon</p>
       <p class="modal-note" style="margin-top:12px">App version v<span id="settings-current-version"></span></p>
+    </div>
+
+    <div class="card" id="test-mode-card">
+      <h3 style="margin-bottom:8px">Test mode</h3>
+      <p class="modal-note" style="margin-bottom:12px">
+        On-course checklist: features check off automatically as you use them. Progress stays on this device.
+      </p>
+      <div class="setting-row">
+        <div class="setting-text">
+          <strong>Track live tests</strong>
+          <span>Record feature use into the checklist while you play.</span>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="setting-test-mode" onchange="onTestModeToggle(this.checked)">
+          <span class="slider"></span>
+        </label>
+      </div>
+      <button type="button" class="btn-primary" style="width:100%;margin-top:8px" onclick="openTestChecklist()">Open checklist</button>
+      <button type="button" class="btn-secondary" style="width:100%;margin-top:10px" onclick="resetTestChecklist()">Reset checklist</button>
+    </div>
+  </div>
+
+  <!-- MODAL: Test checklist -->
+  <div id="modal-test-checklist" class="modal">
+    <div class="modal-content">
+      <h3 style="margin-bottom:6px">On-course test checklist</h3>
+      <p class="modal-note" id="test-checklist-summary">0 / 0 checked</p>
+      <ul class="test-check-list" id="test-checklist-body"></ul>
+      <button type="button" class="btn-secondary" style="width:100%;margin-top:16px" onclick="closeModal()">Close</button>
     </div>
   </div>
 
@@ -1247,9 +1317,8 @@
   </div>
 
 <script>
-const APP_VERSION = "1.4.9";
+const APP_VERSION = "1.4.12";
 const PAGES_URL = "https://azzabazza11.github.io/golf-tracker/";
-const BUY_ME_A_COFFEE_URL = ""; // paste Buy Me a Coffee / Ko-fi URL when ready
 const CLUBS = ["Dr","3w","5w","Hybrid","3i","4i","5i","6i","7i","8i","9i","PW","GW","SW","LW","Putter"];
 const PIN_ACCEPT_M = 10;
 const PIN_LOCK_M = 5;
@@ -1258,6 +1327,11 @@ const DRIVE_STABLE_N = 5;
 const MOCK_ORIGIN = { lat: -36.8485, lon: 174.7633 }; // Auckland-ish for laptop tests
 const ON_GREEN_M = 15;
 const AUTO_MARK_STILL_MS = 9000;
+const NEXT_TEE_NEAR_M = 5;
+const NEXT_TEE_LEAVE_M = 12;
+const NEXT_TEE_HANDOFF_DWELL_MS = 18000;
+const NEXT_TEE_TEEOFF_DWELL_MS = 6000;
+const TEST_UNLOCK_TAPS = 7;
 const DEFAULT_MAP_ALIGN = { offsetX: 0, offsetY: 0, scale: 1, rotation: 0 };
 const DEFAULT_MAP_VIEW = { offsetX: 0, offsetY: 0, scale: 1, rotation: 0 };
 
@@ -1287,7 +1361,9 @@ function loadSettings() {
       markSound: s.markSound !== false,
       showWalkTrack: s.showWalkTrack !== false,
       theme: s.theme === "light" ? "light" : "dark",
-      pocketLockAuto: s.pocketLockAuto !== false
+      pocketLockAuto: s.pocketLockAuto !== false,
+      testMode: !!s.testMode,
+      testUnlocked: !!s.testUnlocked
     };
   } catch (e) {
     return {
@@ -1295,7 +1371,9 @@ function loadSettings() {
       markSound: true,
       showWalkTrack: true,
       theme: "dark",
-      pocketLockAuto: true
+      pocketLockAuto: true,
+      testMode: false,
+      testUnlocked: false
     };
   }
 }
@@ -1362,6 +1440,15 @@ let audioCtx = null;
 let motionListener = null;
 let clubEditCtx = null; // { mode, roundId?, holeIndex, shotIndex }
 
+// Next-tee auto-mark handoff (pocket lock continuous play)
+let lastNearPinPos = null;
+let lastPosBeforeNextTee = null;
+let teeHandoffChimed = false;
+let teeHandoffDwellSince = null;
+let teeHandoffDwellTick = null;
+let teeHandoffInProgress = false;
+let teeHandoffFailUntil = 0;
+
 // ---------- Helpers ----------
 function haversine(lat1, lon1, lat2, lon2) {
   const R = 6371000;
@@ -1401,12 +1488,132 @@ function showToast(msg) {
   setTimeout(() => el.classList.remove("show"), 3500);
 }
 
+// ---------- On-course test mode (secret unlock via About taps) ----------
+const TEST_CHECKLIST_ITEMS = [
+  { id: "gps_fix", label: "GPS fix received" },
+  { id: "start_round", label: "Start a round" },
+  { id: "tee_off", label: "Tee off" },
+  { id: "mark_shot_manual", label: "Mark a shot manually" },
+  { id: "hole_out_manual", label: "Hole out manually" },
+  { id: "auto_mark_shot", label: "Auto-mark a shot" },
+  { id: "auto_mark_countdown", label: "Auto-mark still countdown (dots)" },
+  { id: "pocket_lock", label: "Engage pocket lock" },
+  { id: "pocket_unlock", label: "Swipe unlock pocket lock" },
+  { id: "tee_chime", label: "Next-tee proximity chime" },
+  { id: "tee_handoff", label: "Auto next-tee handoff" },
+  { id: "map_open", label: "Open hole / course map" },
+  { id: "map_photo", label: "Add a map photo" },
+  { id: "map_set_tee_pin", label: "Set photo tee and pin" },
+  { id: "map_pinch", label: "Pinch-zoom the map" },
+  { id: "map_step_hole", label: "Step holes on the map ←→" },
+  { id: "share_qr", label: "Open Share QR" },
+  { id: "review_round", label: "Review a round" },
+  { id: "review_swipe", label: "Swipe between games in review" },
+  { id: "hole_history", label: "Open hole history" },
+  { id: "continue_partial", label: "Continue a partial round" },
+  { id: "star_record", label: "Trigger a record star" },
+  { id: "club_edit", label: "Assign / edit a club" },
+  { id: "light_mode", label: "Toggle light mode" },
+  { id: "walk_track", label: "Toggle walk track on map" },
+  { id: "save_exit", label: "Save and exit a round" }
+];
+
+let aboutSecretTaps = [];
+let testChecklistCache = null;
+
+function loadTestChecklist() {
+  if (testChecklistCache) return testChecklistCache;
+  try {
+    const raw = localStorage.getItem("gst_test_checklist");
+    testChecklistCache = raw ? JSON.parse(raw) : {};
+    if (!testChecklistCache || typeof testChecklistCache !== "object") testChecklistCache = {};
+  } catch (e) {
+    testChecklistCache = {};
+  }
+  return testChecklistCache;
+}
+
+function saveTestChecklist() {
+  try {
+    localStorage.setItem("gst_test_checklist", JSON.stringify(loadTestChecklist()));
+  } catch (e) { /* ignore */ }
+}
+
+function recordTestEvent(id) {
+  if (!settings.testMode || !id) return;
+  const data = loadTestChecklist();
+  if (data[id]) return;
+  data[id] = new Date().toISOString();
+  saveTestChecklist();
+  const modal = document.getElementById("modal-test-checklist");
+  if (modal?.classList.contains("active")) renderTestChecklist();
+}
+
+function onAboutSecretTap() {
+  const now = Date.now();
+  aboutSecretTaps = aboutSecretTaps.filter(t => now - t < 2800);
+  aboutSecretTaps.push(now);
+  if (aboutSecretTaps.length < TEST_UNLOCK_TAPS) return;
+  aboutSecretTaps = [];
+  if (!settings.testUnlocked) {
+    settings.testUnlocked = true;
+    saveSettings();
+    showToast("Test mode unlocked");
+  }
+  renderSettings();
+  const card = document.getElementById("test-mode-card");
+  if (card) card.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+function onTestModeToggle(on) {
+  settings.testMode = !!on;
+  saveSettings();
+  showToast(on ? "Test tracking on" : "Test tracking off");
+}
+
+function openTestChecklist() {
+  renderTestChecklist();
+  document.getElementById("modal-test-checklist")?.classList.add("active");
+}
+
+function resetTestChecklist() {
+  if (!confirm("Clear all checklist progress on this device?")) return;
+  testChecklistCache = {};
+  saveTestChecklist();
+  renderTestChecklist();
+  showToast("Checklist reset");
+}
+
+function renderTestChecklist() {
+  const data = loadTestChecklist();
+  const body = document.getElementById("test-checklist-body");
+  const summary = document.getElementById("test-checklist-summary");
+  if (!body) return;
+  let done = 0;
+  body.innerHTML = TEST_CHECKLIST_ITEMS.map(item => {
+    const at = data[item.id];
+    if (at) done++;
+    const when = at
+      ? `<span class="meta">${new Date(at).toLocaleString()}</span>`
+      : "";
+    return `<li class="${at ? "done" : ""}">
+      <span class="box" aria-hidden="true">${at ? "✓" : ""}</span>
+      <span class="label">${escapeHtml(item.label)}${when}</span>
+    </li>`;
+  }).join("");
+  if (summary) {
+    summary.textContent = `${done} / ${TEST_CHECKLIST_ITEMS.length} checked` +
+      (settings.testMode ? " · tracking on" : " · tracking off");
+  }
+}
+
 // ---------- Record star (floating ★ → celebratory popup) ----------
 let starQueue = [];
 let starSwipe = null;
 
 function enqueueStar(ach) {
   if (!ach || !ach.title) return;
+  recordTestEvent("star_record");
   starQueue.push({
     title: ach.title,
     headline: ach.headline || "",
@@ -1702,6 +1909,7 @@ function updateLiveDistance() {
     el.textContent = Math.round(pendingDistance) + " m";
     syncPocketLockDistance(el.textContent);
     maybeRedrawLiveMap();
+    checkTeeHandoffProximity();
     return;
   }
 
@@ -1709,6 +1917,7 @@ function updateLiveDistance() {
     el.textContent = "—";
     syncPocketLockDistance("—");
     maybeRedrawLiveMap();
+    checkTeeHandoffProximity();
     return;
   }
 
@@ -1723,6 +1932,7 @@ function updateLiveDistance() {
   if (document.getElementById("modal-tee").classList.contains("active")) {
     updateToHoleDisplay("tee-to-hole", currentPosition);
   }
+  checkTeeHandoffProximity();
 }
 
 // ---------- Course hole extras (pin + drives) ----------
@@ -1773,11 +1983,13 @@ function recomputePinAverage(pin) {
     pin.marks.every(m => haversine(m.lat, m.lon, pin.lat, pin.lon) <= PIN_LOCK_M);
 }
 
-function tryRecordPinMark(pos) {
+function tryRecordPinMark(pos, opts) {
+  const silent = !!(opts && opts.silent);
   const courseHole = ensureCourseHole(currentHoleIndex);
   if (!courseHole || !pos) return;
 
   if (!courseHole.pin) {
+    if (silent) return; // never prompt during auto handoff
     if (!confirm("Are you standing at the hole/cup?\n\nThis saves the first pin position for this hole.")) {
       showToast("Pin not recorded");
       return;
@@ -1798,12 +2010,12 @@ function tryRecordPinMark(pos) {
   const dist = haversine(pos.lat, pos.lon, pin.lat, pin.lon);
 
   if (dist > PIN_ACCEPT_M) {
-    showToast(`Too far from known pin (${Math.round(dist)} m) — not recorded`);
+    if (!silent) showToast(`Too far from known pin (${Math.round(dist)} m) — not recorded`);
     return;
   }
 
   if (pin.locked) {
-    showToast("Pin locked — position kept");
+    if (!silent) showToast("Pin locked — position kept");
     return;
   }
 
@@ -1816,9 +2028,11 @@ function tryRecordPinMark(pos) {
   if (pin.marks.length > 20) pin.marks = pin.marks.slice(-20);
   recomputePinAverage(pin);
   saveData();
-  showToast(pin.locked
-    ? "Pin updated and locked (stable)"
-    : `Pin updated (${pin.count} marks)`);
+  if (!silent) {
+    showToast(pin.locked
+      ? "Pin updated and locked (stable)"
+      : `Pin updated (${pin.count} marks)`);
+  }
 }
 
 function circularBearingStdDev(bearings) {
@@ -2150,11 +2364,15 @@ function startRound(courseId) {
   clubForCurrentShot = null;
   pendingShotPosition = null;
   mockMoveStep = 0;
+  resetTeeHandoffState();
+  lastNearPinPos = null;
+  lastPosBeforeNextTee = null;
 
   document.getElementById("play-course-name").textContent = currentCourse.name;
   updatePlayUI();
   startGPS();
   showScreen("play");
+  recordTestEvent("start_round");
 }
 
 function updatePlayUI() {
@@ -2295,11 +2513,13 @@ function confirmTeeOff() {
   selectedClub = null;
   closeModal();
   noteMarkEvent();
+  resetTeeHandoffState();
+  lastNearPinPos = null;
+  lastPosBeforeNextTee = null;
   startAutoMarkWatch();
   updatePlayUI();
+  recordTestEvent("tee_off");
 }
-
-function openConfirmModal(dist) {
   document.getElementById("confirm-club-used").textContent = clubForCurrentShot || "—";
   document.getElementById("confirm-distance").textContent = Math.round(dist) + " m";
   document.getElementById("adjust-distance").value = Math.round(dist);
@@ -2360,11 +2580,16 @@ function confirmShot() {
   selectedClub = null;
   closeModal();
   updatePlayUI();
+  recordTestEvent("mark_shot_manual");
 }
 
-function advanceAfterHoleOut() {
-  unlockPocketLock();
+function advanceAfterHoleOut(opts) {
+  const keepLock = !!(opts && opts.keepLock);
+  if (!keepLock) unlockPocketLock();
   stopAutoMarkWatch();
+  resetTeeHandoffState();
+  lastNearPinPos = null;
+  lastPosBeforeNextTee = null;
   if (currentHoleIndex < currentRound.holes.length - 1) {
     currentHoleIndex++;
     isTeeingOff = true;
@@ -2373,7 +2598,9 @@ function advanceAfterHoleOut() {
     pendingShotPosition = null;
     mockMoveStep = 0;
     updatePlayUI();
+    if (keepLock && pocketLocked) updatePocketLockInfo();
   } else {
+    if (keepLock) unlockPocketLock();
     stopGPS();
     showSummary();
   }
@@ -2432,6 +2659,7 @@ function holeOut() {
   }
 
   advanceAfterHoleOut();
+  recordTestEvent("hole_out_manual");
 }
 
 function showSummary() {
@@ -2470,9 +2698,8 @@ function saveRoundAndHome() {
   stopAutoMarkWatch();
   stopGPS();
   showScreen("home");
+  recordTestEvent("save_exit");
 }
-
-function roundHasProgress(round) {
   if (!round?.holes) return false;
   return round.holes.some(h =>
     h.teePosition ||
@@ -2504,6 +2731,7 @@ function exitRoundAndSave() {
   }
   currentRound = null;
   showScreen("home");
+  recordTestEvent("save_exit");
 }
 
 function confirmExitRound() {
@@ -2562,6 +2790,11 @@ function closeTopModal() {
   const shareQr = document.getElementById("modal-share-qr");
   if (shareQr?.classList.contains("active")) {
     shareQr.classList.remove("active");
+    return true;
+  }
+  const testCheck = document.getElementById("modal-test-checklist");
+  if (testCheck?.classList.contains("active")) {
+    testCheck.classList.remove("active");
     return true;
   }
   const hist = document.getElementById("modal-hole-history");
@@ -2689,6 +2922,7 @@ function applyMockPosition(pos) {
   status.className = "status warn";
   updateLiveDistance();
   maybeRedrawLiveMap();
+  recordTestEvent("gps_fix");
 }
 
 function enableMockGps(reason) {
@@ -2773,6 +3007,7 @@ function startGPS() {
       }
 
       updateLiveDistance();
+      recordTestEvent("gps_fix");
     },
     err => {
       console.warn("GPS error:", err);
@@ -2879,6 +3114,7 @@ function knownTeeForHole(courseId, holeIndex, roundHole) {
 function reviewRound(id, opts) {
   const round = rounds.find(r => r.id === id);
   if (!round) return;
+  recordTestEvent("review_round");
   const course = courses.find(c => c.id === round.courseId);
   const game = gameNumberForRound(round);
   const gameLabel = document.getElementById("review-game-label");
@@ -2964,6 +3200,7 @@ function stepReviewRound(delta) {
     showToast(delta < 0 ? "First game" : "Latest game");
     return;
   }
+  recordTestEvent("review_swipe");
   reviewRound(nextId, { animate: delta > 0 ? "from-left" : "from-right" });
 }
 
@@ -3003,6 +3240,7 @@ function openHoleHistory(courseId, holeIndex, highlightRoundId) {
     showToast("Course hole not found");
     return;
   }
+  recordTestEvent("hole_history");
   const holeNum = holeIndex + 1;
   const par = course.holes[holeIndex].par;
   document.getElementById("hole-history-title").textContent =
@@ -3128,12 +3366,16 @@ function resumePartialRound(roundId) {
   pendingShotPosition = null;
   selectedClub = null;
   mockMoveStep = 0;
+  resetTeeHandoffState();
+  lastNearPinPos = null;
+  lastPosBeforeNextTee = null;
   document.getElementById("play-course-name").textContent = course.name;
   updatePlayUI();
   startGPS();
   if (settings.autoMark && !isTeeingOff) startAutoMarkWatch();
   showScreen("play");
   showToast("Continuing round");
+  recordTestEvent("continue_partial");
 }
 
 // ---------- Hole map (photo underlay) ----------
@@ -3384,6 +3626,7 @@ function openHoleMapFromReview(roundId, holeIndex) {
 
 async function openMapSession(session) {
   mapSession = session;
+  recordTestEvent("map_open");
   mapTapMode = null;
   mapManualAlign = false;
   pendingMapImageFile = null;
@@ -3459,6 +3702,7 @@ async function mapStepHole(delta) {
   ensureCourseHole(next, mapSession.course);
   updateMapHoleNavButtons();
   await loadMapImageForSession();
+  recordTestEvent("map_step_hole");
 
   // Keep previous camera as animation start
   Object.assign(getMapAlign(), fromAlign);
@@ -3959,6 +4203,7 @@ function handleMapCalibTap(sx, sy) {
   mapTapMode = null;
 
   if (h.photoCalib.tee && h.photoCalib.pin) {
+    recordTestEvent("map_set_tee_pin");
     if (applyPhotoCalibToAlign()) {
       const hole = ensureCourseHole(mapSession.holeIndex, mapSession.course);
       hole.mapView = { ...DEFAULT_MAP_VIEW };
@@ -4279,6 +4524,7 @@ function confirmMapImageScope(scope) {
 function applyMapPhotoFile(file, scope) {
   const courseId = mapSession.courseId;
   const holeNum = mapSession.roundHole.holeNumber;
+  recordTestEvent("map_photo");
   const key = scope === "hole"
     ? holeImageKey(courseId, holeNum)
     : courseImageKey(courseId);
@@ -4482,6 +4728,7 @@ function bindMapGestures() {
         xform.offsetX += mid.x - mapLastPinchMid.x;
         xform.offsetY += mid.y - mapLastPinchMid.y;
         drawHoleMap();
+        recordTestEvent("map_pinch");
       }
       mapLastPinchDist = dist;
       mapLastPinchMid = mid;
@@ -4549,22 +4796,10 @@ function renderSettings() {
   const cur = document.getElementById("settings-current-version");
   if (cur) cur.textContent = APP_VERSION;
 
-  const coffeeBtn = document.getElementById("btn-buy-coffee");
-  const coffeeNote = document.getElementById("buy-coffee-note");
-  const coffeeReady = !!(BUY_ME_A_COFFEE_URL && /^https?:\/\//i.test(BUY_ME_A_COFFEE_URL));
-  if (coffeeBtn) coffeeBtn.disabled = !coffeeReady;
-  if (coffeeNote) {
-    coffeeNote.textContent = coffeeReady ? "Opens in your browser — thank you." : "Link coming soon";
-  }
-}
-
-function openBuyMeACoffee() {
-  const url = BUY_ME_A_COFFEE_URL && BUY_ME_A_COFFEE_URL.trim();
-  if (!url || !/^https?:\/\//i.test(url)) {
-    showToast("Coffee link coming soon");
-    return;
-  }
-  window.open(url, "_blank", "noopener,noreferrer");
+  const testCard = document.getElementById("test-mode-card");
+  if (testCard) testCard.classList.toggle("show", !!settings.testUnlocked);
+  const testToggle = document.getElementById("setting-test-mode");
+  if (testToggle) testToggle.checked = !!settings.testMode;
 }
 
 function appShareUrl() {
@@ -4581,6 +4816,7 @@ function openShareQrModal() {
   const label = document.getElementById("share-qr-url-label");
   if (label) label.textContent = appShareUrl();
   document.getElementById("modal-share-qr").classList.add("active");
+  recordTestEvent("share_qr");
 }
 
 async function shareAppLink() {
@@ -4605,6 +4841,7 @@ function onLightModeToggle(on) {
   settings.theme = on ? "light" : "dark";
   saveSettings();
   applyTheme();
+  recordTestEvent("light_mode");
 }
 
 function updateMapWalkTrackButton() {
@@ -4619,6 +4856,7 @@ function toggleWalkTrack() {
   settings.showWalkTrack = !settings.showWalkTrack;
   saveSettings();
   updateMapWalkTrackButton();
+  recordTestEvent("walk_track");
   if (document.getElementById("modal-map")?.classList.contains("active")) {
     drawHoleMap();
   }
@@ -4691,6 +4929,7 @@ function engagePocketLock() {
   overlay.setAttribute("aria-hidden", "false");
   resetPocketSwipeKnob();
   bindPocketSwipe();
+  recordTestEvent("pocket_lock");
 }
 
 function updatePocketLockInfo() {
@@ -4728,6 +4967,7 @@ function unlockPocketLock() {
   overlay.setAttribute("aria-hidden", "true");
   resetPocketSwipeKnob();
   schedulePocketLockIdle();
+  recordTestEvent("pocket_unlock");
 }
 
 function resetPocketSwipeKnob() {
@@ -4912,6 +5152,298 @@ function playMarkBeeps(n) {
   }
 }
 
+/** Softer two-note chime — next tee within 5 m (distinct from shot beeps). */
+function playTeeNearbyChime() {
+  recordTestEvent("tee_chime");
+  if (!settings.autoMark || !settings.markSound) return;
+  ensureAudioCtx();
+  if (!audioCtx) return;
+  const notes = [523.25, 659.25]; // C5 → E5
+  notes.forEach((freq, i) => {
+    const t0 = audioCtx.currentTime + i * 0.28;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = "sine";
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(0.0001, t0);
+    gain.gain.exponentialRampToValueAtTime(0.16, t0 + 0.03);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.22);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start(t0);
+    osc.stop(t0 + 0.24);
+  });
+  if (navigator.vibrate) {
+    try { navigator.vibrate([40, 80, 40]); } catch (_) {}
+  }
+}
+
+function resetTeeHandoffState() {
+  teeHandoffChimed = false;
+  teeHandoffDwellSince = null;
+  if (teeHandoffDwellTick) {
+    clearInterval(teeHandoffDwellTick);
+    teeHandoffDwellTick = null;
+  }
+}
+
+function clearTeeHandoffDwell() {
+  teeHandoffDwellSince = null;
+  if (teeHandoffDwellTick) {
+    clearInterval(teeHandoffDwellTick);
+    teeHandoffDwellTick = null;
+  }
+}
+
+function ensureTeeHandoffDwellTick() {
+  if (teeHandoffDwellTick) return;
+  teeHandoffDwellTick = setInterval(() => {
+    checkTeeHandoffProximity();
+  }, 400);
+}
+
+function holeHasHoleOut(hole) {
+  return !!(hole && hole.shots && hole.shots.some(s => s.holeOut));
+}
+
+/** Watch next known tee while playing, or current known tee while teeing off. */
+function getTeeHandoffWatchTarget() {
+  if (!settings.autoMark || !currentRound || !currentCourse) return null;
+  if (getActiveScreenId() !== "play") return null;
+  if (teeHandoffInProgress) return null;
+
+  if (isTeeingOff) {
+    const tee = knownTeeForHole(
+      currentRound.courseId,
+      currentHoleIndex,
+      currentRound.holes[currentHoleIndex]
+    );
+    if (!tee) return null;
+    return { tee, mode: "teeOff", dwellMs: NEXT_TEE_TEEOFF_DWELL_MS };
+  }
+
+  const hole = currentRound.holes[currentHoleIndex];
+  if (!hole || holeHasHoleOut(hole)) return null;
+  if (!hole.teePosition && !(hole.shots && hole.shots.length)) return null;
+  if (currentHoleIndex >= currentRound.holes.length - 1) return null;
+
+  const nextIdx = currentHoleIndex + 1;
+  const tee = knownTeeForHole(
+    currentRound.courseId,
+    nextIdx,
+    currentRound.holes[nextIdx]
+  );
+  if (!tee) return null;
+  return { tee, mode: "nextTee", dwellMs: NEXT_TEE_HANDOFF_DWELL_MS, nextIdx };
+}
+
+function inTeeHandoffNearZone() {
+  const target = getTeeHandoffWatchTarget();
+  if (!target || !currentPosition) return false;
+  const d = haversine(
+    currentPosition.lat, currentPosition.lon,
+    target.tee.lat, target.tee.lon
+  );
+  return d <= NEXT_TEE_NEAR_M;
+}
+
+function updateTeeHandoffTracking(pos) {
+  if (!pos || !currentRound || !settings.autoMark) return;
+  if (isTeeingOff) return;
+
+  const pin = getPin(currentHoleIndex);
+  if (pin) {
+    const dPin = haversine(pos.lat, pos.lon, pin.lat, pin.lon);
+    if (dPin <= ON_GREEN_M) {
+      lastNearPinPos = { lat: pos.lat, lon: pos.lon, accuracy: pos.accuracy };
+    }
+  }
+
+  const target = getTeeHandoffWatchTarget();
+  if (target && target.mode === "nextTee") {
+    const dTee = haversine(pos.lat, pos.lon, target.tee.lat, target.tee.lon);
+    if (dTee > NEXT_TEE_NEAR_M) {
+      lastPosBeforeNextTee = { lat: pos.lat, lon: pos.lon, accuracy: pos.accuracy };
+    }
+  }
+}
+
+function checkTeeHandoffProximity() {
+  if (!currentPosition) {
+    clearTeeHandoffDwell();
+    return;
+  }
+  updateTeeHandoffTracking(currentPosition);
+
+  if (!settings.autoMark || !currentRound) {
+    clearTeeHandoffDwell();
+    return;
+  }
+
+  const target = getTeeHandoffWatchTarget();
+  if (!target) {
+    clearTeeHandoffDwell();
+    return;
+  }
+
+  const d = haversine(
+    currentPosition.lat, currentPosition.lon,
+    target.tee.lat, target.tee.lon
+  );
+
+  if (d > NEXT_TEE_LEAVE_M) {
+    teeHandoffChimed = false;
+    clearTeeHandoffDwell();
+    return;
+  }
+  if (d > NEXT_TEE_NEAR_M) {
+    clearTeeHandoffDwell();
+    return;
+  }
+
+  if (Date.now() < teeHandoffFailUntil) return;
+
+  if (!teeHandoffChimed) {
+    teeHandoffChimed = true;
+    playTeeNearbyChime();
+  }
+  if (!teeHandoffDwellSince) teeHandoffDwellSince = Date.now();
+  ensureTeeHandoffDwellTick();
+
+  if (Date.now() - teeHandoffDwellSince >= target.dwellMs) {
+    completeTeeHandoff(target);
+  }
+}
+
+function resolveAutoHoleOutPosition(hole, nextTee) {
+  const candidates = [];
+  if (lastNearPinPos) candidates.push(lastNearPinPos);
+  if (hole?.shots?.length) {
+    const last = hole.shots[hole.shots.length - 1];
+    if (last?.to) candidates.push(last.to);
+  }
+  if (lastPosBeforeNextTee) candidates.push(lastPosBeforeNextTee);
+
+  for (const c of candidates) {
+    if (!c || c.lat == null || c.lon == null) continue;
+    if (nextTee) {
+      const d = haversine(c.lat, c.lon, nextTee.lat, nextTee.lon);
+      if (d < 20) continue; // reject marks that are basically at next tee
+    }
+    return { lat: c.lat, lon: c.lon, accuracy: c.accuracy || null };
+  }
+  return null;
+}
+
+function autoHoleOutSilent(nextTee) {
+  if (!currentRound || isTeeingOff) return false;
+  const hole = currentRound.holes[currentHoleIndex];
+  if (!hole || holeHasHoleOut(hole)) return false;
+  if (!anchorPosition) return false;
+
+  const toPos = resolveAutoHoleOutPosition(hole, nextTee);
+  if (!toPos) return false;
+
+  const from = { ...anchorPosition };
+  const to = { lat: toPos.lat, lon: toPos.lon, accuracy: toPos.accuracy };
+  const distance = haversine(from.lat, from.lon, to.lat, to.lon);
+  const shotNum = hole.shots.length + 1;
+
+  hole.shots.push({
+    number: shotNum,
+    distance,
+    club: clubForCurrentShot || "Putter",
+    from,
+    to,
+    auto: true,
+    holeOut: true,
+    at: new Date().toISOString()
+  });
+  if (shotNum === 1) recordDrive(from, to);
+
+  noteMarkEvent();
+  anchorPosition = { lat: to.lat, lon: to.lon };
+  clubForCurrentShot = null;
+  pendingShotPosition = null;
+  selectedClub = null;
+
+  tryRecordPinMark(to, { silent: true });
+  checkHoleScoreRecords();
+  return true;
+}
+
+function autoTeeOffSilent() {
+  if (!currentRound || !isTeeingOff) return false;
+  const hole = currentRound.holes[currentHoleIndex];
+  if (!hole) return false;
+
+  const known = knownTeeForHole(currentRound.courseId, currentHoleIndex, hole);
+  const pos = currentPosition || known;
+  if (!pos) return false;
+
+  hole.teePosition = {
+    lat: pos.lat,
+    lon: pos.lon,
+    accuracy: pos.accuracy || null,
+    club: null,
+    at: new Date().toISOString(),
+    auto: true
+  };
+  anchorPosition = { lat: pos.lat, lon: pos.lon };
+  clubForCurrentShot = null;
+  hole.nextClub = null;
+  isTeeingOff = false;
+  noteMarkEvent();
+  resetTeeHandoffState();
+  lastNearPinPos = null;
+  lastPosBeforeNextTee = null;
+  startAutoMarkWatch();
+  updatePlayUI();
+  if (pocketLocked) updatePocketLockInfo();
+  showToast(`Hole ${hole.holeNumber} · auto tee`);
+  return true;
+}
+
+function completeTeeHandoff(target) {
+  if (teeHandoffInProgress || !currentRound || !settings.autoMark) return;
+  teeHandoffInProgress = true;
+  clearTeeHandoffDwell();
+
+  try {
+    if (target.mode === "nextTee") {
+      const nextTee = target.tee;
+      if (!autoHoleOutSilent(nextTee)) {
+        showToast("Near next tee — hole out manually if putt GPS missing");
+        teeHandoffChimed = true;
+        teeHandoffFailUntil = Date.now() + 45000;
+        return;
+      }
+      if (currentHoleIndex >= currentRound.holes.length - 1) {
+        advanceAfterHoleOut({ keepLock: false });
+        recordTestEvent("tee_handoff");
+        return;
+      }
+      const keepLock = pocketLocked;
+      advanceAfterHoleOut({ keepLock });
+      if (!autoTeeOffSilent()) {
+        showToast("At next tee — tap Tee Off when ready");
+      }
+      recordTestEvent("tee_handoff");
+      return;
+    }
+
+    if (target.mode === "teeOff") {
+      if (!autoTeeOffSilent()) {
+        showToast("At tee — tap Tee Off when ready");
+      } else {
+        recordTestEvent("tee_handoff");
+      }
+    }
+  } finally {
+    teeHandoffInProgress = false;
+  }
+}
+
 function median(nums) {
   if (!nums.length) return null;
   const a = [...nums].sort((x, y) => x - y);
@@ -5012,6 +5544,7 @@ function paintAmDots(rootId, state) {
 
 function updateAutoMarkCountdownUI() {
   const state = getAutoMarkCountdownState();
+  if (state.show) recordTestEvent("auto_mark_countdown");
   paintAmDots("auto-mark-countdown", state);
   paintAmDots("pocket-lock-am-countdown", pocketLocked ? state : { show: false });
 }
@@ -5082,12 +5615,14 @@ function stopAutoMarkWatch() {
   motionBuf = [];
   hideAutoUndo();
   updateAutoMarkCountdownUI();
+  // Keep tee-handoff proximity alive while teeing off in auto-mark; only clear on full reset
 }
 
 function tryAutoMark() {
   if (!autoMarkWatching || !currentRound || isTeeingOff) return;
   if (document.getElementById("modal-confirm")?.classList.contains("active")) return;
   if (document.getElementById("modal-tee")?.classList.contains("active")) return;
+  if (teeHandoffInProgress || inTeeHandoffNearZone()) return;
   const now = Date.now();
   if (now < autoMarkCooldownUntil) return;
   if (now - lastMarkAt < minAutoMarkIntervalMs()) return;
@@ -5137,6 +5672,7 @@ function tryAutoMark() {
   updatePlayUI();
   if (pocketLocked) updatePocketLockInfo();
   showToast(`Auto-marked shot ${shotNum}`);
+  recordTestEvent("auto_mark_shot");
 }
 
 function showAutoUndo() {
@@ -5298,6 +5834,7 @@ function confirmClubEdit() {
   clubEditCtx = null;
   document.getElementById("modal-edit-club").classList.remove("active");
   showToast("Club saved");
+  recordTestEvent("club_edit");
 
   if (window._pendingHoleAdvance) {
     maybeFinishHoleClubAssign(false);
