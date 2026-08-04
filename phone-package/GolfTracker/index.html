@@ -634,13 +634,62 @@
     .pocket-lock-sub {
       color: var(--muted);
       font-size: 14px;
-      margin-bottom: 28px;
+      margin-bottom: 10px;
     }
+    .pocket-lock-club {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--accent);
+      margin-bottom: 8px;
+      min-height: 1.2em;
+    }
+    .pocket-lock-shots {
+      text-align: left;
+      margin: 0 auto 16px;
+      max-width: 280px;
+      max-height: 28vh;
+      overflow-y: auto;
+      font-size: 14px;
+    }
+    .pocket-lock-shots .pocket-shot-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 6px 0;
+      border-bottom: 1px solid var(--border);
+      color: var(--text);
+    }
+    .pocket-lock-shots .pocket-shot-row:last-child { border-bottom: none; }
+    .pocket-lock-shots .pocket-shot-row strong { font-variant-numeric: tabular-nums; }
     .pocket-lock-title {
       font-size: 18px;
       font-weight: 600;
       margin-bottom: 8px;
     }
+
+    .am-countdown {
+      display: none;
+      justify-content: center;
+      align-items: center;
+      gap: 11px;
+      margin: 10px 0 6px;
+      min-height: 14px;
+    }
+    .am-countdown.show { display: flex; }
+    .am-dot {
+      width: 11px;
+      height: 11px;
+      border-radius: 50%;
+      background: var(--border);
+      opacity: 0.3;
+      transition: background 0.18s ease, opacity 0.18s ease, transform 0.18s ease;
+    }
+    .am-dot.on {
+      opacity: 1;
+      transform: scale(1.2);
+    }
+    .pocket-lock .am-countdown { margin: 4px 0 14px; }
+
     .pocket-swipe {
       position: relative;
       height: 64px;
@@ -865,7 +914,25 @@
       <h3 style="margin-bottom:8px">Share</h3>
       <p class="modal-note" style="margin-bottom:12px">Show the QR for the live GitHub Pages app (keeps your data on this device).</p>
       <button type="button" class="btn-primary" style="width:100%" onclick="openShareQrModal()">Share QR</button>
-      <p class="modal-note" style="margin-top:10px">App version v<span id="settings-current-version"></span></p>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-bottom:8px">About</h3>
+      <p class="modal-note" style="margin-bottom:10px">
+        Shot Tracker started as a way to keep score and distances on the course without accounts, ads, or sending your rounds to a server. GPS marks and maps stay on your phone.
+      </p>
+      <p class="modal-note" style="margin-bottom:10px">
+        The idea is simple tracking you can trust in the pocket: tee off, mark, hole out, review later. Share the live link; each device keeps its own data.
+      </p>
+      <p class="modal-note" style="margin-bottom:14px">
+        Shot Tracker is free to use and will stay free — no paywall, no subscription.
+      </p>
+      <p class="modal-note" style="margin-bottom:10px">
+        If it helped your round and you want to say thanks, you can buy me a coffee.
+      </p>
+      <button type="button" class="btn-warning" style="width:100%" id="btn-buy-coffee" onclick="openBuyMeACoffee()" disabled>Buy me a coffee</button>
+      <p class="modal-note" style="margin-top:8px" id="buy-coffee-note">Link coming soon</p>
+      <p class="modal-note" style="margin-top:12px">App version v<span id="settings-current-version"></span></p>
     </div>
   </div>
 
@@ -947,6 +1014,13 @@
       <div class="status good" id="current-club-display" style="margin-top:6px"></div>
       <div class="status" id="drive-stability-display" style="margin-top:6px"></div>
       <div class="status warn" id="auto-mark-status"></div>
+      <div id="auto-mark-countdown" class="am-countdown" aria-hidden="true" title="Auto-mark countdown">
+        <span class="am-dot" data-i="0"></span>
+        <span class="am-dot" data-i="1"></span>
+        <span class="am-dot" data-i="2"></span>
+        <span class="am-dot" data-i="3"></span>
+        <span class="am-dot" data-i="4"></span>
+      </div>
       <div id="auto-undo-bar">
         <button type="button" class="btn-warning" style="width:100%;padding:10px;font-size:14px" onclick="undoLastAutoMark()">Undo last auto-mark</button>
       </div>
@@ -979,6 +1053,15 @@
     <div class="pocket-lock-inner">
       <div class="pocket-lock-dist" id="pocket-lock-distance">—</div>
       <div class="pocket-lock-sub" id="pocket-lock-hole">Shot mode</div>
+      <div class="pocket-lock-club" id="pocket-lock-club"></div>
+      <div id="pocket-lock-am-countdown" class="am-countdown" aria-hidden="true" title="Auto-mark countdown">
+        <span class="am-dot" data-i="0"></span>
+        <span class="am-dot" data-i="1"></span>
+        <span class="am-dot" data-i="2"></span>
+        <span class="am-dot" data-i="3"></span>
+        <span class="am-dot" data-i="4"></span>
+      </div>
+      <div class="pocket-lock-shots" id="pocket-lock-shots"></div>
       <div class="pocket-lock-title">Pocket lock</div>
       <div class="pocket-swipe" id="pocket-swipe" aria-label="Swipe to unlock">
         <span class="pocket-swipe-text">Swipe to unlock</span>
@@ -1131,7 +1214,10 @@
   <div id="modal-map-image-scope" class="modal">
     <div class="modal-content">
       <h3 style="margin-bottom:8px">Use this photo for…</h3>
-      <p class="modal-note">Most scorecards work as one course photo. Use this hole only for a higher-res single-hole image.</p>
+      <p class="modal-note" style="margin-bottom:8px">
+        Tip: a photo of your scorecard works really well — one clear shot of the whole card is usually enough for every hole.
+      </p>
+      <p class="modal-note">Choose <strong>All holes</strong> for a scorecard or course map. Use <strong>This hole</strong> only if you have a sharper single-hole image.</p>
       <div class="row" style="margin-top:16px">
         <button type="button" class="btn-secondary" onclick="confirmMapImageScope('hole')">This hole</button>
         <button type="button" class="btn-primary" onclick="confirmMapImageScope('course')">All holes</button>
@@ -1161,8 +1247,9 @@
   </div>
 
 <script>
-const APP_VERSION = "1.4.6";
+const APP_VERSION = "1.4.8";
 const PAGES_URL = "https://azzabazza11.github.io/golf-tracker/";
+const BUY_ME_A_COFFEE_URL = ""; // paste Buy Me a Coffee / Ko-fi URL when ready
 const CLUBS = ["Dr","3w","5w","Hybrid","3i","4i","5i","6i","7i","8i","9i","PW","GW","SW","LW","Putter"];
 const PIN_ACCEPT_M = 10;
 const PIN_LOCK_M = 5;
@@ -1170,6 +1257,7 @@ const PIN_LOCK_MIN_SAMPLES = 3;
 const DRIVE_STABLE_N = 5;
 const MOCK_ORIGIN = { lat: -36.8485, lon: 174.7633 }; // Auckland-ish for laptop tests
 const ON_GREEN_M = 15;
+const AUTO_MARK_STILL_MS = 9000;
 const DEFAULT_MAP_ALIGN = { offsetX: 0, offsetY: 0, scale: 1, rotation: 0 };
 const DEFAULT_MAP_VIEW = { offsetX: 0, offsetY: 0, scale: 1, rotation: 0 };
 
@@ -1267,6 +1355,7 @@ let motionBuf = [];
 let walkSeen = false;
 let stillSince = null;
 let autoMarkCooldownUntil = 0;
+let autoMarkStillTick = null;
 let lastAutoUndo = null;
 let undoHideTimer = null;
 let audioCtx = null;
@@ -2110,7 +2199,7 @@ function updatePlayUI() {
   const clubEl = document.getElementById("current-club-display");
   if (clubEl) {
     if (isTeeingOff) clubEl.textContent = "";
-    else if (clubForCurrentShot) clubEl.textContent = "Next up: " + clubForCurrentShot;
+    else if (clubForCurrentShot) clubEl.textContent = "Selected club: " + clubForCurrentShot;
     else if (settings.autoMark) clubEl.textContent = "Clubs: assign later (tap shots)";
     else clubEl.textContent = "";
   }
@@ -2127,6 +2216,8 @@ function updatePlayUI() {
       amStatus.textContent = "";
     }
   }
+  updateAutoMarkCountdownUI();
+  if (pocketLocked) updatePocketLockInfo();
 
   const driveEl = document.getElementById("drive-stability-display");
   if (driveEl) driveEl.textContent = driveStabilityText(currentHoleIndex);
@@ -4457,6 +4548,23 @@ function renderSettings() {
 
   const cur = document.getElementById("settings-current-version");
   if (cur) cur.textContent = APP_VERSION;
+
+  const coffeeBtn = document.getElementById("btn-buy-coffee");
+  const coffeeNote = document.getElementById("buy-coffee-note");
+  const coffeeReady = !!(BUY_ME_A_COFFEE_URL && /^https?:\/\//i.test(BUY_ME_A_COFFEE_URL));
+  if (coffeeBtn) coffeeBtn.disabled = !coffeeReady;
+  if (coffeeNote) {
+    coffeeNote.textContent = coffeeReady ? "Opens in your browser — thank you." : "Link coming soon";
+  }
+}
+
+function openBuyMeACoffee() {
+  const url = BUY_ME_A_COFFEE_URL && BUY_ME_A_COFFEE_URL.trim();
+  if (!url || !/^https?:\/\//i.test(url)) {
+    showToast("Coffee link coming soon");
+    return;
+  }
+  window.open(url, "_blank", "noopener,noreferrer");
 }
 
 function appShareUrl() {
@@ -4576,16 +4684,40 @@ function engagePocketLock() {
   pocketLocked = true;
   const live = document.getElementById("live-distance");
   syncPocketLockDistance(live ? live.textContent : "—");
-  const hole = currentRound.holes[currentHoleIndex];
-  const sub = document.getElementById("pocket-lock-hole");
-  if (sub && hole) {
-    sub.textContent = `Hole ${hole.holeNumber} · swipe when ready to mark`;
-  }
+  updatePocketLockInfo();
+  updateAutoMarkCountdownUI();
   const overlay = document.getElementById("pocket-lock");
   overlay.classList.add("show");
   overlay.setAttribute("aria-hidden", "false");
   resetPocketSwipeKnob();
   bindPocketSwipe();
+}
+
+function updatePocketLockInfo() {
+  if (!currentRound) return;
+  const hole = currentRound.holes[currentHoleIndex];
+  const sub = document.getElementById("pocket-lock-hole");
+  if (sub && hole) {
+    sub.textContent = settings.autoMark
+      ? `Hole ${hole.holeNumber}`
+      : `Hole ${hole.holeNumber} · swipe when ready to mark`;
+  }
+  const clubEl = document.getElementById("pocket-lock-club");
+  if (clubEl) {
+    clubEl.textContent = clubForCurrentShot ? ("Selected club: " + clubForCurrentShot) : "";
+  }
+  const shotsEl = document.getElementById("pocket-lock-shots");
+  if (shotsEl) {
+    if (!hole?.shots?.length) {
+      shotsEl.innerHTML = "";
+    } else {
+      shotsEl.innerHTML = hole.shots.map(s => {
+        const club = s.club ? ` · ${escapeHtml(s.club)}` : "";
+        const dist = typeof s.distance === "number" ? `${Math.round(s.distance)} m` : "—";
+        return `<div class="pocket-shot-row"><span>#${s.number}${club}</span><strong>${dist}</strong></div>`;
+      }).join("");
+    }
+  }
 }
 
 function unlockPocketLock() {
@@ -4799,7 +4931,9 @@ function noteMarkEvent() {
   lastMarkAt = now;
   walkSeen = false;
   stillSince = null;
+  stopAutoMarkStillTick();
   autoMarkCooldownUntil = now + 25000;
+  updateAutoMarkCountdownUI();
 }
 
 function minAutoMarkIntervalMs() {
@@ -4814,6 +4948,72 @@ function accelMag(ev) {
     : ev.accelerationIncludingGravity;
   if (!a || a.x == null) return null;
   return Math.sqrt(a.x * a.x + a.y * a.y + a.z * a.z);
+}
+
+function stopAutoMarkStillTick() {
+  if (autoMarkStillTick) {
+    clearInterval(autoMarkStillTick);
+    autoMarkStillTick = null;
+  }
+}
+
+function ensureAutoMarkStillTick() {
+  if (autoMarkStillTick) return;
+  autoMarkStillTick = setInterval(() => {
+    updateAutoMarkCountdownUI();
+    if (walkSeen && stillSince && Date.now() - stillSince >= AUTO_MARK_STILL_MS) {
+      tryAutoMark();
+    }
+    if (!stillSince) stopAutoMarkStillTick();
+  }, 200);
+}
+
+/** 5 dots collapse outside→in while still; color red→green. */
+function getAutoMarkCountdownState() {
+  if (!settings.autoMark || !autoMarkWatching || isTeeingOff || !currentRound) {
+    return { show: false };
+  }
+  if (!walkSeen || !stillSince) return { show: false };
+  const progress = Math.min(1, (Date.now() - stillSince) / AUTO_MARK_STILL_MS);
+  // 5 → 4 → 3 → 2 → 1 as progress advances
+  const remaining = Math.max(1, 5 - Math.floor(progress * 5));
+  return { show: true, remaining, progress };
+}
+
+function paintAmDots(rootId, state) {
+  const root = document.getElementById(rootId);
+  if (!root) return;
+  const dots = root.querySelectorAll(".am-dot");
+  if (!state.show) {
+    root.classList.remove("show");
+    root.setAttribute("aria-hidden", "true");
+    dots.forEach(d => {
+      d.classList.remove("on");
+      d.style.background = "";
+    });
+    return;
+  }
+  root.classList.add("show");
+  root.setAttribute("aria-hidden", "false");
+  const n = state.remaining;
+  const start = Math.floor((5 - n) / 2);
+  const end = start + n;
+  const t = state.progress;
+  const r = Math.round(231 + (46 - 231) * t);
+  const g = Math.round(76 + (204 - 76) * t);
+  const b = Math.round(60 + (113 - 60) * t);
+  const color = `rgb(${r},${g},${b})`;
+  dots.forEach((d, i) => {
+    const on = i >= start && i < end;
+    d.classList.toggle("on", on);
+    d.style.background = on ? color : "";
+  });
+}
+
+function updateAutoMarkCountdownUI() {
+  const state = getAutoMarkCountdownState();
+  paintAmDots("auto-mark-countdown", state);
+  paintAmDots("pocket-lock-am-countdown", pocketLocked ? state : { show: false });
 }
 
 function onDeviceMotion(ev) {
@@ -4834,13 +5034,19 @@ function onDeviceMotion(ev) {
   if (walking) {
     walkSeen = true;
     stillSince = null;
+    stopAutoMarkStillTick();
+    updateAutoMarkCountdownUI();
     return;
   }
   if (walkSeen && still) {
     if (!stillSince) stillSince = now;
-    if (now - stillSince >= 9000) tryAutoMark();
+    ensureAutoMarkStillTick();
+    updateAutoMarkCountdownUI();
+    if (now - stillSince >= AUTO_MARK_STILL_MS) tryAutoMark();
   } else if (!still) {
     stillSince = null;
+    stopAutoMarkStillTick();
+    updateAutoMarkCountdownUI();
   }
 }
 
@@ -4856,6 +5062,7 @@ function startAutoMarkWatch() {
   autoMarkWatching = true;
   walkSeen = false;
   stillSince = null;
+  stopAutoMarkStillTick();
   motionBuf = [];
   if (!lastMarkAt) lastMarkAt = Date.now();
   motionListener = onDeviceMotion;
@@ -4871,8 +5078,10 @@ function stopAutoMarkWatch() {
   }
   walkSeen = false;
   stillSince = null;
+  stopAutoMarkStillTick();
   motionBuf = [];
   hideAutoUndo();
+  updateAutoMarkCountdownUI();
 }
 
 function tryAutoMark() {
@@ -4924,7 +5133,9 @@ function tryAutoMark() {
   showAutoUndo();
   stillSince = null;
   walkSeen = false;
+  stopAutoMarkStillTick();
   updatePlayUI();
+  if (pocketLocked) updatePocketLockInfo();
   showToast(`Auto-marked shot ${shotNum}`);
 }
 
