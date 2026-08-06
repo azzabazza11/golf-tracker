@@ -1238,14 +1238,25 @@
       <div class="setting-row">
         <div class="setting-text">
           <strong>Track live tests</strong>
-          <span>Record feature use into the checklist while you play.</span>
+          <span>Checklist + rising settle tone, GPS defer blips, and a play log for upload.</span>
         </div>
         <label class="switch">
           <input type="checkbox" id="setting-test-mode" onchange="onTestModeToggle(this.checked)">
           <span class="slider"></span>
         </label>
       </div>
+      <div class="setting-row">
+        <div class="setting-text">
+          <strong>Heartbeat chime (test only)</strong>
+          <span>Soft tick every ~40s while auto-mark is watching — confirms the app is awake.</span>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="setting-test-heartbeat" onchange="onTestHeartbeatToggle(this.checked)">
+          <span class="slider"></span>
+        </label>
+      </div>
       <button type="button" class="btn-primary" style="width:100%;margin-top:8px" onclick="openTestChecklist()">Open checklist</button>
+      <button type="button" class="btn-secondary" style="width:100%;margin-top:10px" onclick="exportTestPlayLog()">Export test play log</button>
       <button type="button" class="btn-secondary" style="width:100%;margin-top:10px" onclick="resetTestChecklist()">Reset checklist</button>
     </div>
   </div>
@@ -1618,7 +1629,7 @@
   </div>
 
 <script>
-const APP_VERSION = "1.5.4";
+const APP_VERSION = "1.5.5";
 const PAGES_URL = "https://azzabazza11.github.io/golf-tracker/";
 const FEEDBACK_EMAIL = "aaron.callinan@gmail.com";
 const SUPPORT_URL = "https://ko-fi.com/aaroncallinan";
@@ -1646,6 +1657,9 @@ const CAL_MOTION_WEIGHT_FAIRWAY = 0.4;
 const CAL_MAX_SAMPLES = 9000;
 const CAL_MARKER_TYPES = ["A_stop", "B_stroke", "C_practice", "D_putt", "pause_duck"];
 const BACKUP_FORMAT = "gst-backup-v1";
+const TEST_LOG_FORMAT = "gst-test-log-v1";
+const TEST_LOG_MAX = 2500;
+const MOTION_PEAK_HALFLIFE_S = 1.6;
 
 const SENSITIVITY_DEFAULTS = {
   autoMarkSettleM: 3,
@@ -1655,7 +1669,8 @@ const SENSITIVITY_DEFAULTS = {
   teeNearM: 3,
   teeLeaveM: 6,
   pinAcceptM: 8,
-  onGreenM: 12
+  onGreenM: 12,
+  motionSensitivity: 5
 };
 
 const SENSITIVITY_PRESETS = {
@@ -1667,7 +1682,8 @@ const SENSITIVITY_PRESETS = {
     teeNearM: 3,
     teeLeaveM: 5,
     pinAcceptM: 6,
-    onGreenM: 10
+    onGreenM: 10,
+    motionSensitivity: 3
   },
   balanced: { ...SENSITIVITY_DEFAULTS },
   forgiving: {
@@ -1678,7 +1694,8 @@ const SENSITIVITY_PRESETS = {
     teeNearM: 5,
     teeLeaveM: 10,
     pinAcceptM: 12,
-    onGreenM: 18
+    onGreenM: 18,
+    motionSensitivity: 7
   }
 };
 
@@ -1690,7 +1707,8 @@ const SENSITIVITY_RANGES = {
   teeNearM: { min: 2, max: 8, step: 0.5, label: "Tee near radius (m)" },
   teeLeaveM: { min: 4, max: 15, step: 1, label: "Tee leave radius (m)" },
   pinAcceptM: { min: 5, max: 20, step: 1, label: "Pin accept radius (m)" },
-  onGreenM: { min: 8, max: 25, step: 1, label: "On-green radius (m)" }
+  onGreenM: { min: 8, max: 25, step: 1, label: "On-green radius (m)" },
+  motionSensitivity: { min: 1, max: 10, step: 1, label: "Motion sensitivity (1 quiet → 10 keen)" }
 };
 
 // Safe storage load — never reference `courses`/`rounds` inside this helper (avoids TDZ)
@@ -1733,6 +1751,7 @@ function loadSettings() {
       greenTapPutts: s.greenTapPutts !== false,
       voiceChimes: !!s.voiceChimes,
       showScoreHud: !!s.showScoreHud,
+      testHeartbeat: !!s.testHeartbeat,
       lastBackupAt: s.lastBackupAt || null,
       sensPreset: s.sensPreset === "strict" || s.sensPreset === "forgiving" ? s.sensPreset : "balanced"
     };
@@ -1753,6 +1772,7 @@ function loadSettings() {
       greenTapPutts: true,
       voiceChimes: false,
       showScoreHud: false,
+      testHeartbeat: false,
       lastBackupAt: null,
       sensPreset: "balanced",
       ...SENSITIVITY_DEFAULTS
@@ -1842,9 +1862,23 @@ let gpsRecentBuf = []; // raw recent fixes { lat, lon, accuracy, t }
 let gpsGoodBuf = [];   // accepted quality fixes
 let lastGpsDeferReason = null;
 let lastGpsDeferToastAt = 0;
+let lastGpsDeferToneAt = 0;
 let greenTapTimes = [];
 let courseSuggestId = null;
 let beginTeeChimedHole = null;
+
+// Hybrid auto-mark: settle + swing arm + walk-away commit
+let hybridSwingArmed = false;
+let hybridArmedCentroid = null;
+let hybridArmedAt = 0;
+let motionPeakHold = 0;
+let motionPeakUpdatedAt = 0;
+let playWakeLock = null;
+let settleTempoLastAt = 0;
+let settleTempoWasSettling = false;
+let testHeartbeatLastAt = 0;
+let testPlayLog = [];
+let testPlayLogStartedAt = null;
 
 // Calibration session (GPS + motion data capture)
 let calRecording = false;
@@ -1942,6 +1976,8 @@ function ingestGpsFix(raw) {
   const maxAcc = sens("gpsMaxAccuracyM");
   if (fix.accuracy > maxAcc) {
     lastGpsDeferReason = "accuracy";
+    playGpsDeferTone("accuracy");
+    pushTestLog("gps_reject", { reason: "accuracy", accuracy: fix.accuracy });
     return { accepted: false, reason: "accuracy", fix };
   }
 
@@ -1952,6 +1988,8 @@ function ingestGpsFix(raw) {
     if (d / dt > GPS_MAX_FOOT_SPEED_MS) {
       lastGpsDeferReason = "jump";
       maybeToastGpsDefer("GPS jump detected — waiting for stable fix");
+      playGpsDeferTone("jump");
+      pushTestLog("gps_reject", { reason: "jump", speed: Math.round(d / dt) });
       return { accepted: false, reason: "jump", fix };
     }
     const med = gpsMedianPoint(gpsGoodBuf.slice(-8));
@@ -1961,6 +1999,8 @@ function ingestGpsFix(raw) {
       if (jump > lim && dt < 5) {
         lastGpsDeferReason = "jump";
         maybeToastGpsDefer("GPS jump detected — waiting for stable fix");
+        playGpsDeferTone("jump");
+        pushTestLog("gps_reject", { reason: "jump", meters: Math.round(jump) });
         return { accepted: false, reason: "jump", fix };
       }
     }
@@ -2066,27 +2106,14 @@ function gpsDiagText() {
   }
   const defer = lastGpsDeferReason ? ` · ${lastGpsDeferReason}` : "";
   const scores = computeMarkScores();
-  const scoreBit = (calRecording || settings.showScoreHud)
-    ? ` · GPS ${scores.gps}% · mot ${scores.motion}% · Σ ${scores.combined}%`
+  const scoreBit = (calRecording || settings.showScoreHud || settings.testMode)
+    ? ` · GPS ${scores.gps}% · mot ${scores.motion}%${scores.swingArmed ? " · armed" : ""} · Σ ${scores.combined}%`
     : "";
   const motion = lastMotionMag != null && !scoreBit ? ` · motion ref ${lastMotionMag.toFixed(1)}` : "";
   return `${acc} · ${fromShot} · ${settle}${defer}${scoreBit}${motion}`;
 }
 
 // ---------- Hybrid score channels (0–100, for calibration + future auto-mark) ----------
-function getMotionStats() {
-  if (motionBuf.length < 2) {
-    const mag = lastMotionMag != null ? lastMotionMag : 0;
-    return { mean: mag, variance: 0, mag, spike: false };
-  }
-  const vals = motionBuf.map(s => s.m);
-  const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
-  const variance = vals.reduce((a, b) => a + (b - mean) ** 2, 0) / vals.length;
-  const mag = lastMotionMag != null ? lastMotionMag : mean;
-  const spike = mag > mean + 2.2 || mag > 4.5;
-  return { mean, variance, mag, spike };
-}
-
 function computeGpsScore() {
   const cluster = getSettleCluster();
   let score = Math.min(100, Math.max(0, cluster.progress * 100));
@@ -2100,12 +2127,61 @@ function computeGpsScore() {
   return Math.round(Math.min(100, Math.max(0, score)));
 }
 
-function computeMotionScore() {
+function getMotionStats() {
+  if (motionBuf.length < 2) {
+    const mag = lastMotionMag != null ? lastMotionMag : 0;
+    return { mean: mag, variance: 0, mag, spike: false };
+  }
+  const vals = motionBuf.map(s => s.m);
+  const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
+  const variance = vals.reduce((a, b) => a + (b - mean) ** 2, 0) / vals.length;
+  const mag = lastMotionMag != null ? lastMotionMag : mean;
+  const spike = mag > mean + 2.2 || mag > 4.5;
+  return { mean, variance, mag, spike };
+}
+
+/** Instant motion score 0–100 (jumpy — for peak-hold input). */
+function computeMotionScoreInstant() {
   const { mean, variance, mag, spike } = getMotionStats();
   if (spike) return Math.min(95, Math.round(72 + Math.min(23, (mag - mean) * 6)));
   if (variance > 0.35 && mean > 1.1) return Math.round(28 + Math.min(18, variance * 35));
   if (variance > 0.15 || mean > 0.9) return Math.round(18 + Math.min(15, variance * 25 + mean * 4));
   return Math.round(8 + Math.min(12, mean * 2));
+}
+
+/** Slow-decay peak hold — peaks rise fast, fall slowly (calibration-friendly). */
+function updateMotionPeakHold() {
+  const instant = computeMotionScoreInstant();
+  const now = Date.now();
+  if (!motionPeakUpdatedAt) {
+    motionPeakHold = instant;
+  } else {
+    const dt = Math.max(0, (now - motionPeakUpdatedAt) / 1000);
+    const decay = Math.pow(0.5, dt / MOTION_PEAK_HALFLIFE_S);
+    motionPeakHold = Math.max(instant, motionPeakHold * decay);
+  }
+  motionPeakUpdatedAt = now;
+  return Math.round(motionPeakHold);
+}
+
+function computeMotionScore() {
+  return updateMotionPeakHold();
+}
+
+/** Swing burst while at the ball — not sustained pocket walking. */
+function isSwingBurst() {
+  const { mag, mean, spike, variance } = getMotionStats();
+  const ms = sens("motionSensitivity");
+  const magThresh = Math.max(5, 8 - (ms - 5) * 0.45);
+  if (variance > 18 && mag < magThresh + 3) return false;
+  if (mag >= magThresh) return true;
+  if (spike && mag >= magThresh - 1.2 && mag > mean + 2) return true;
+  return false;
+}
+
+function swingArmThreshold() {
+  const ms = sens("motionSensitivity");
+  return Math.max(55, Math.min(90, 78 - (ms - 5) * 3));
 }
 
 function computeCombinedScore(gpsScore, motionScore, zone) {
@@ -2121,7 +2197,8 @@ function computeMarkScores(zone) {
   const combined = computeCombinedScore(gps, motion, zone);
   const cluster = getSettleCluster();
   const markPos = getBestMarkPosition();
-  let wouldMark = combined >= CAL_MARK_THRESHOLD && cluster.settled;
+  const swingOk = motion >= swingArmThreshold() || isSwingBurst();
+  let wouldMark = cluster.settled && swingOk && hybridSwingArmed;
   if (anchorPosition && markPos) {
     const plaus = checkShotPlausibility(anchorPosition, markPos);
     wouldMark = wouldMark && plaus.ok;
@@ -2131,6 +2208,8 @@ function computeMarkScores(zone) {
     motion,
     combined,
     threshold: CAL_MARK_THRESHOLD,
+    swingArmed: hybridSwingArmed,
+    swingOk,
     wouldMark,
     weights: { gps: zone === "green" ? 0.3 : CAL_GPS_WEIGHT_FAIRWAY, motion: zone === "green" ? 0.7 : CAL_MOTION_WEIGHT_FAIRWAY }
   };
@@ -2326,10 +2405,6 @@ async function releaseCalWakeLock() {
   } catch (_) {}
 }
 
-document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible" && calRecording) requestCalWakeLock();
-});
-
 async function startCalibrationSession() {
   if (calRecording) {
     showToast("Already recording");
@@ -2490,7 +2565,12 @@ function onAboutSecretTap() {
 function onTestModeToggle(on) {
   settings.testMode = !!on;
   saveSettings();
-  showToast(on ? "Test tracking on" : "Test tracking off");
+  if (on) {
+    ensureAudioCtx();
+    if (!testPlayLogStartedAt) testPlayLogStartedAt = Date.now();
+    pushTestLog("test_mode_on", {});
+  }
+  showToast(on ? "Test tracking on · settle tones + log" : "Test tracking off");
 }
 
 function openTestChecklist() {
@@ -6142,6 +6222,8 @@ function renderSettings() {
   if (testCard) testCard.classList.toggle("show", !!settings.testUnlocked);
   const testToggle = document.getElementById("setting-test-mode");
   if (testToggle) testToggle.checked = !!settings.testMode;
+  const hb = document.getElementById("setting-test-heartbeat");
+  if (hb) hb.checked = !!settings.testHeartbeat;
 }
 
 function appShareUrl() {
@@ -6348,6 +6430,7 @@ function engagePocketLock() {
   syncPocketLockDistance(live ? live.textContent : "—");
   updatePocketLockInfo();
   updateAutoMarkCountdownUI();
+  syncPlayWakeLock();
   const overlay = document.getElementById("pocket-lock");
   overlay.classList.add("show");
   overlay.setAttribute("aria-hidden", "false");
@@ -6392,6 +6475,7 @@ function unlockPocketLock() {
   overlay.setAttribute("aria-hidden", "true");
   resetPocketSwipeKnob();
   schedulePocketLockIdle();
+  syncPlayWakeLock();
   recordTestEvent("pocket_unlock");
 }
 
@@ -6639,6 +6723,211 @@ function playTeeNearbyChime() {
     try { navigator.vibrate([40, 80, 40]); } catch (_) {}
   }
 }
+
+/** Walk-away confirm — GPS + motion left the settle spot (before shot beeps). */
+function playWalkAwayChime() {
+  if (!settings.autoMark || !settings.markSound) return;
+  ensureAudioCtx();
+  if (!audioCtx) return;
+  const t0 = audioCtx.currentTime;
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = "triangle";
+  osc.frequency.setValueAtTime(392, t0);
+  osc.frequency.exponentialRampToValueAtTime(262, t0 + 0.18);
+  gain.gain.setValueAtTime(0.0001, t0);
+  gain.gain.exponentialRampToValueAtTime(0.14, t0 + 0.02);
+  gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.2);
+  osc.connect(gain);
+  gain.connect(audioCtx.destination);
+  osc.start(t0);
+  osc.stop(t0 + 0.22);
+  pushTestLog("walk_away_chime", {});
+}
+
+/** Test mode only: rising pitch/tempo while GPS settle progress advances. */
+function tickSettleTempoAudio(cluster) {
+  if (!settings.testMode || !settings.markSound) {
+    settleTempoWasSettling = false;
+    return;
+  }
+  const settling = !!(cluster && (cluster.reason === "dwell" || cluster.reason === "spread") && cluster.progress > 0.05 && !cluster.settled);
+  if (!settling) {
+    if (settleTempoWasSettling && cluster && cluster.settled) {
+      // brief settle-complete chirp
+      ensureAudioCtx();
+      if (audioCtx) {
+        const t0 = audioCtx.currentTime;
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = "sine";
+        osc.frequency.value = 990;
+        gain.gain.setValueAtTime(0.0001, t0);
+        gain.gain.exponentialRampToValueAtTime(0.12, t0 + 0.01);
+        gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.08);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start(t0);
+        osc.stop(t0 + 0.1);
+      }
+      pushTestLog("settle_complete", { progress: 1 });
+    }
+    settleTempoWasSettling = false;
+    return;
+  }
+  settleTempoWasSettling = true;
+  const progress = Math.min(1, Math.max(0, cluster.progress));
+  const intervalMs = 780 - progress * 560; // ~780ms → ~220ms
+  const now = Date.now();
+  if (now - settleTempoLastAt < intervalMs) return;
+  settleTempoLastAt = now;
+  ensureAudioCtx();
+  if (!audioCtx) return;
+  const freq = 420 + progress * 480;
+  const t0 = audioCtx.currentTime;
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = "sine";
+  osc.frequency.value = freq;
+  gain.gain.setValueAtTime(0.0001, t0);
+  gain.gain.exponentialRampToValueAtTime(0.09, t0 + 0.01);
+  gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.06);
+  osc.connect(gain);
+  gain.connect(audioCtx.destination);
+  osc.start(t0);
+  osc.stop(t0 + 0.07);
+}
+
+/** Test mode only: muted blip when GPS jump/accuracy defer. */
+function playGpsDeferTone(reason) {
+  if (!settings.testMode || !settings.markSound) return;
+  const now = Date.now();
+  if (now - lastGpsDeferToneAt < 2500) return;
+  lastGpsDeferToneAt = now;
+  ensureAudioCtx();
+  if (!audioCtx) return;
+  const t0 = audioCtx.currentTime;
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = "sine";
+  osc.frequency.value = reason === "jump" ? 180 : 220;
+  gain.gain.setValueAtTime(0.0001, t0);
+  gain.gain.exponentialRampToValueAtTime(0.1, t0 + 0.02);
+  gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.15);
+  osc.connect(gain);
+  gain.connect(audioCtx.destination);
+  osc.start(t0);
+  osc.stop(t0 + 0.16);
+  pushTestLog("gps_defer_tone", { reason });
+}
+
+function tickTestHeartbeat() {
+  if (!settings.testMode || !settings.testHeartbeat || !settings.markSound) return;
+  if (!autoMarkWatching || isTeeingOff) return;
+  const now = Date.now();
+  if (now - testHeartbeatLastAt < 40000) return;
+  testHeartbeatLastAt = now;
+  ensureAudioCtx();
+  if (!audioCtx) return;
+  const t0 = audioCtx.currentTime;
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = "sine";
+  osc.frequency.value = 660;
+  gain.gain.setValueAtTime(0.0001, t0);
+  gain.gain.exponentialRampToValueAtTime(0.05, t0 + 0.01);
+  gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.04);
+  osc.connect(gain);
+  gain.connect(audioCtx.destination);
+  osc.start(t0);
+  osc.stop(t0 + 0.05);
+}
+
+function pushTestLog(type, data) {
+  if (!settings.testMode) return;
+  if (!testPlayLogStartedAt) testPlayLogStartedAt = Date.now();
+  testPlayLog.push({
+    t: Date.now() - testPlayLogStartedAt,
+    at: new Date().toISOString(),
+    type,
+    hole: currentRound ? currentHoleIndex + 1 : null,
+    ...(data || {})
+  });
+  if (testPlayLog.length > TEST_LOG_MAX) testPlayLog = testPlayLog.slice(-TEST_LOG_MAX);
+}
+
+function exportTestPlayLog() {
+  if (!testPlayLog.length) {
+    showToast("No test log events yet — play with Test mode on");
+    return;
+  }
+  const payload = {
+    format: TEST_LOG_FORMAT,
+    appVersion: APP_VERSION,
+    exportedAt: new Date().toISOString(),
+    startedAt: testPlayLogStartedAt ? new Date(testPlayLogStartedAt).toISOString() : null,
+    sensitivity: Object.fromEntries(Object.keys(SENSITIVITY_DEFAULTS).map(k => [k, sens(k)])),
+    events: testPlayLog
+  };
+  const json = JSON.stringify(payload, null, 2);
+  const blob = new Blob([json], { type: "application/json" });
+  const a = document.createElement("a");
+  const d = new Date();
+  const pad = n => String(n).padStart(2, "0");
+  a.href = URL.createObjectURL(blob);
+  a.download = `gst-test-log-${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}.json`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+  showToast(`Test log exported · ${testPlayLog.length} events`);
+}
+
+function onTestHeartbeatToggle(on) {
+  settings.testHeartbeat = !!on;
+  saveSettings();
+  renderSettings();
+}
+
+function resetHybridArm() {
+  hybridSwingArmed = false;
+  hybridArmedCentroid = null;
+  hybridArmedAt = 0;
+}
+
+async function requestPlayWakeLock() {
+  try {
+    if (!("wakeLock" in navigator)) return;
+    if (playWakeLock) return;
+    playWakeLock = await navigator.wakeLock.request("screen");
+    playWakeLock.addEventListener("release", () => { playWakeLock = null; });
+  } catch (e) {
+    console.warn("Play wake lock unavailable", e);
+  }
+}
+
+async function releasePlayWakeLock() {
+  try {
+    if (playWakeLock) {
+      await playWakeLock.release();
+      playWakeLock = null;
+    }
+  } catch (_) {}
+}
+
+function shouldHoldPlayWakeLock() {
+  return !!(settings.autoMark && currentRound && (autoMarkWatching || pocketLocked || calRecording));
+}
+
+function syncPlayWakeLock() {
+  if (shouldHoldPlayWakeLock()) requestPlayWakeLock();
+  else if (!calRecording) releasePlayWakeLock();
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") {
+    if (calRecording) requestCalWakeLock();
+    if (shouldHoldPlayWakeLock()) requestPlayWakeLock();
+  }
+});
 
 function resetTeeHandoffState() {
   teeHandoffChimed = false;
@@ -6925,6 +7214,7 @@ function noteMarkEvent() {
   }
   lastMarkAt = now;
   settleSince = null;
+  resetHybridArm();
   stopAutoMarkSettleTick();
   autoMarkCooldownUntil = now + 25000;
   updateAutoMarkCountdownUI();
@@ -6961,7 +7251,8 @@ function ensureAutoMarkSettleTick() {
       stopAutoMarkSettleTick();
       return;
     }
-    tryAutoMark();
+    updateHybridAutoMark();
+    tickTestHeartbeat();
   }, 250);
 }
 
@@ -6978,8 +7269,8 @@ function getAutoMarkCountdownState() {
   const cluster = getSettleCluster();
   if (cluster.progress <= 0 && !cluster.settled) return { show: false };
   const progress = Math.min(1, Math.max(0, cluster.progress));
-  const remaining = Math.max(1, 5 - Math.floor(progress * 5));
-  return { show: true, remaining, progress };
+  const remaining = hybridSwingArmed ? 1 : Math.max(1, 5 - Math.floor(progress * 5));
+  return { show: true, remaining, progress: hybridSwingArmed ? 1 : progress };
 }
 
 function paintAmDots(rootId, state) {
@@ -7043,8 +7334,10 @@ function onDeviceMotion(ev) {
   const now = Date.now();
   motionBuf.push({ t: now, m: mag });
   motionBuf = motionBuf.filter(s => now - s.t < 2500);
-  if (pocketLocked || settings.autoMark || calRecording || settings.showScoreHud) updateGpsDiagUI();
+  updateMotionPeakHold();
+  if (pocketLocked || settings.autoMark || calRecording || settings.showScoreHud || settings.testMode) updateGpsDiagUI();
   if (calRecording) updateCalibrationOverlayUI();
+  if (autoMarkWatching) updateHybridAutoMark();
 
   // Green tap / shake putt assist near pin
   if (!settings.greenTapPutts || !settings.autoMark || !currentRound || isTeeingOff) return;
@@ -7129,59 +7422,114 @@ function startAutoMarkWatch() {
   }
   if (autoMarkWatching) {
     ensureAutoMarkSettleTick();
+    syncPlayWakeLock();
     updatePlayUI();
     return;
   }
   autoMarkWatching = true;
   settleSince = null;
+  resetHybridArm();
   if (!lastMarkAt) lastMarkAt = Date.now();
+  if (settings.testMode && !testPlayLogStartedAt) testPlayLogStartedAt = Date.now();
   startMotionDiagListener();
+  ensureAudioCtx();
   ensureAutoMarkSettleTick();
+  syncPlayWakeLock();
   updatePlayUI();
+  pushTestLog("auto_mark_watch_start", {});
 }
 
 function stopAutoMarkWatch() {
   autoMarkWatching = false;
   settleSince = null;
+  resetHybridArm();
   stopAutoMarkSettleTick();
   hideAutoUndo();
   updateAutoMarkCountdownUI();
   stopMotionDiagListener();
+  syncPlayWakeLock();
   updateGpsDiagUI();
 }
 
-function tryAutoMark() {
+/** Hybrid: GPS settle + swing arm + walk-away → mark. */
+function updateHybridAutoMark() {
   if (!autoMarkWatching || !currentRound || isTeeingOff) return;
   if (document.getElementById("modal-confirm")?.classList.contains("active")) return;
   if (document.getElementById("modal-tee")?.classList.contains("active")) return;
   if (teeHandoffInProgress || inTeeHandoffNearZone()) return;
-  const now = Date.now();
-  if (now < autoMarkCooldownUntil) return;
-  if (now - lastMarkAt < minAutoMarkIntervalMs()) return;
   if (!anchorPosition) return;
 
   const cluster = getSettleCluster();
-  if (!cluster.settled || !cluster.centroid) {
-    if (cluster.reason === "unusual") lastGpsDeferReason = "unusual";
+  tickSettleTempoAudio(cluster);
+  updateMotionPeakHold();
+
+  const now = Date.now();
+  if (now < autoMarkCooldownUntil) return;
+  if (now - lastMarkAt < minAutoMarkIntervalMs()) {
     updateAutoMarkCountdownUI();
-    updateGpsDiagUI();
     return;
   }
 
+  // Arm when settled and swing-like motion while at the ball
+  if (cluster.settled && cluster.centroid) {
+    if (isSwingBurst() || motionPeakHold >= swingArmThreshold()) {
+      if (!hybridSwingArmed) {
+        hybridSwingArmed = true;
+        hybridArmedCentroid = { ...cluster.centroid };
+        hybridArmedAt = now;
+        pushTestLog("swing_armed", {
+          motionPeak: Math.round(motionPeakHold),
+          mag: getMotionStats().mag,
+          gps: computeGpsScore()
+        });
+      } else {
+        hybridArmedCentroid = { ...cluster.centroid };
+      }
+    }
+  } else if (!hybridSwingArmed && (cluster.reason === "spread" || cluster.reason === "samples")) {
+    // lost settle before arming — reset tempo context only
+  }
+
+  // Commit on walk-away after armed
+  if (hybridSwingArmed && hybridArmedCentroid) {
+    const leaveM = Math.max(sens("autoMarkSettleM") * 1.35, 4);
+    const pos = getBestMarkPosition() || currentPosition;
+    if (!pos) return;
+    const away = haversine(hybridArmedCentroid.lat, hybridArmedCentroid.lon, pos.lat, pos.lon);
+    const left = !cluster.settled && away >= leaveM;
+    const walkingHard = getMotionStats().variance > 2.5 && away >= leaveM * 0.85;
+    if (left || walkingHard) {
+      commitHybridAutoMark(hybridArmedCentroid);
+    }
+  }
+
+  updateAutoMarkCountdownUI();
+  updateGpsDiagUI();
+}
+
+function commitHybridAutoMark(centroid) {
+  if (!autoMarkWatching || !currentRound || !anchorPosition || !centroid) return;
   const to = {
-    lat: cluster.centroid.lat,
-    lon: cluster.centroid.lon,
-    accuracy: cluster.centroid.accuracy
+    lat: centroid.lat,
+    lon: centroid.lon,
+    accuracy: centroid.accuracy
   };
   const plaus = checkShotPlausibility(anchorPosition, to);
   if (!plaus.ok) {
     if (plaus.reason === "unusual") {
       lastGpsDeferReason = "unusual";
       maybeToastGpsDefer("GPS settling — unusual distance");
+      playGpsDeferTone("unusual");
     }
-    updateGpsDiagUI();
+    if (plaus.reason === "tooclose") {
+      // Still too close — stay armed, wait for more walk
+      return;
+    }
+    resetHybridArm();
     return;
   }
+
+  playWalkAwayChime();
 
   const hole = currentRound.holes[currentHoleIndex];
   const from = { ...anchorPosition };
@@ -7195,6 +7543,7 @@ function tryAutoMark() {
     from,
     to,
     auto: true,
+    hybrid: true,
     at: new Date().toISOString()
   });
   if (shotNum === 1) recordDrive(from, to);
@@ -7208,14 +7557,20 @@ function tryAutoMark() {
     shotNumber: shotNum,
     prevAnchor: from
   };
+  resetHybridArm();
   noteMarkEvent();
-  playMarkBeeps(shotNum);
+  setTimeout(() => playMarkBeeps(shotNum), 220);
   showAutoUndo();
   lastGpsDeferReason = null;
   updatePlayUI();
   if (pocketLocked) updatePocketLockInfo();
   showToast(`Auto-marked shot ${shotNum}`);
+  pushTestLog("auto_mark_shot", { shotNum, distance: Math.round(dist), motionPeak: Math.round(motionPeakHold) });
   recordTestEvent("auto_mark_shot");
+}
+
+function tryAutoMark() {
+  updateHybridAutoMark();
 }
 
 function showAutoUndo() {
