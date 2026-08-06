@@ -1195,6 +1195,8 @@
       <button type="button" class="btn-warning" style="width:100%" onclick="openSupportLink()">Support on Ko-fi</button>
       <p class="modal-note" style="margin-top:8px">Thanks for helping keep it simple, free, and improving.</p>
       <p class="modal-note" style="margin-top:12px">App version v<span id="settings-current-version"></span></p>
+      <button type="button" class="btn-secondary" style="width:100%;margin-top:10px" onclick="forceAppUpdate()">Get latest version</button>
+      <p class="modal-note" style="margin-top:8px;font-size:12px">Stuck on an old version? Tap above after clearing site data, or use Chrome site settings → Clear &amp; reset for this site.</p>
     </div>
 
     <div class="card" id="calibration-card">
@@ -1616,7 +1618,7 @@
   </div>
 
 <script>
-const APP_VERSION = "1.5.2";
+const APP_VERSION = "1.5.3";
 const PAGES_URL = "https://azzabazza11.github.io/golf-tracker/";
 const FEEDBACK_EMAIL = "aaron.callinan@gmail.com";
 const SUPPORT_URL = "https://ko-fi.com/aaroncallinan";
@@ -2880,8 +2882,10 @@ async function onBackupFileSelected(ev) {
     saveData();
 
     if (data.settings && typeof data.settings === "object") {
-      settings = loadSettings();
-      Object.assign(settings, data.settings);
+      settings = data.settings;
+      Object.keys(SENSITIVITY_DEFAULTS).forEach(k => {
+        settings[k] = clampSens(k, settings[k] != null ? settings[k] : SENSITIVITY_DEFAULTS[k]);
+      });
       saveSettings();
       applyTheme();
     }
@@ -6212,6 +6216,25 @@ function openSupportLink() {
   window.open(SUPPORT_URL, "_blank", "noopener,noreferrer");
 }
 
+/** Clear service worker caches and reload — use when stuck on an old version. */
+async function forceAppUpdate() {
+  if (!confirm("Fetch the latest app from the server?\n\nYour rounds and courses stay unless you cleared site data separately.")) return;
+  showToast("Updating…");
+  try {
+    if ("caches" in window) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map(k => caches.delete(k)));
+    }
+    if ("serviceWorker" in navigator) {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map(r => r.unregister()));
+    }
+  } catch (e) {
+    console.warn("forceAppUpdate", e);
+  }
+  location.reload(true);
+}
+
 function onLightModeToggle(on) {
   settings.theme = on ? "light" : "dark";
   saveSettings();
@@ -7428,7 +7451,9 @@ bindStarBadgeGestures();
 renderHome();
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./service-worker.js").then(reg => reg.update()).catch(() => {});
+    navigator.serviceWorker.register("./service-worker.js?v=" + encodeURIComponent(APP_VERSION))
+      .then(reg => reg.update())
+      .catch(() => {});
   });
 }
 window.addEventListener("beforeinstallprompt", e => {
