@@ -1219,7 +1219,7 @@
 
     <div class="card" id="sensitivity-card">
       <h3 style="margin-bottom:6px">Auto-mark sensitivity</h3>
-      <p class="modal-note" style="margin-bottom:8px">Tune settle radius, dwell, GPS accuracy, and tee/pin zones. Use Strict for dense tee boxes.</p>
+      <p class="modal-note" style="margin-bottom:8px">Motion stop peak + hold time arm the shot. GPS refines location. Mark beeps only after post-swing delay + a small GPS move (avoids chiming mid-swing).</p>
       <div class="sens-presets" id="sens-presets">
         <button type="button" data-preset="strict" onclick="applySensPreset('strict')">Strict</button>
         <button type="button" data-preset="balanced" onclick="applySensPreset('balanced')">Balanced</button>
@@ -1702,7 +1702,7 @@
   </div>
 
 <script>
-const APP_VERSION = "1.5.6";
+const APP_VERSION = "1.5.8";
 const PAGES_URL = "https://azzabazza11.github.io/golf-tracker/";
 const FEEDBACK_EMAIL = "aaron.callinan@gmail.com";
 const SUPPORT_URL = "https://ko-fi.com/aaroncallinan";
@@ -1733,8 +1733,9 @@ const BACKUP_FORMAT = "gst-backup-v1";
 const TEST_LOG_FORMAT = "gst-test-log-v1";
 const TEST_LOG_MAX = 2500;
 const MOTION_PEAK_HALFLIFE_S = 1.6;
-const HYBRID_LEAVE_M = 1;
 const HYBRID_MARKED_FLASH_MS = 1800;
+/** Brief motion spikes above stop threshold are ignored this long (buffer). */
+const MOTION_QUIET_BUFFER_MS = 400;
 
 const SENSITIVITY_DEFAULTS = {
   autoMarkSettleM: 3,
@@ -1745,7 +1746,11 @@ const SENSITIVITY_DEFAULTS = {
   teeLeaveM: 6,
   pinAcceptM: 8,
   onGreenM: 12,
-  motionSensitivity: 5
+  motionSensitivity: 5,
+  motionStopPeak: 20,
+  motionStopS: 3,
+  markConfirmS: 5,
+  markConfirmMoveM: 2
 };
 
 const SENSITIVITY_PRESETS = {
@@ -1758,7 +1763,11 @@ const SENSITIVITY_PRESETS = {
     teeLeaveM: 5,
     pinAcceptM: 6,
     onGreenM: 10,
-    motionSensitivity: 3
+    motionSensitivity: 3,
+    motionStopPeak: 14,
+    motionStopS: 4,
+    markConfirmS: 6,
+    markConfirmMoveM: 3
   },
   balanced: { ...SENSITIVITY_DEFAULTS },
   forgiving: {
@@ -1770,20 +1779,28 @@ const SENSITIVITY_PRESETS = {
     teeLeaveM: 10,
     pinAcceptM: 12,
     onGreenM: 18,
-    motionSensitivity: 7
+    motionSensitivity: 7,
+    motionStopPeak: 28,
+    motionStopS: 2.5,
+    markConfirmS: 4,
+    markConfirmMoveM: 1.5
   }
 };
 
 const SENSITIVITY_RANGES = {
-  autoMarkSettleM: { min: 2, max: 8, step: 0.5, label: "Settle radius (m)" },
-  autoMarkDwellS: { min: 5, max: 20, step: 1, label: "Settle dwell (s)" },
+  autoMarkSettleM: { min: 2, max: 8, step: 0.5, label: "GPS settle radius (m)" },
+  autoMarkDwellS: { min: 3, max: 20, step: 1, label: "GPS cluster window (s)" },
   autoMarkMinShotM: { min: 5, max: 20, step: 1, label: "Min shot move (m)" },
   gpsMaxAccuracyM: { min: 3, max: 25, step: 1, label: "Max GPS accuracy (m)" },
   teeNearM: { min: 2, max: 8, step: 0.5, label: "Tee near radius (m)" },
   teeLeaveM: { min: 4, max: 15, step: 1, label: "Tee leave radius (m)" },
   pinAcceptM: { min: 5, max: 20, step: 1, label: "Pin accept radius (m)" },
   onGreenM: { min: 8, max: 25, step: 1, label: "On-green radius (m)" },
-  motionSensitivity: { min: 1, max: 10, step: 1, label: "Motion sensitivity (1 quiet → 10 keen)" }
+  motionSensitivity: { min: 1, max: 10, step: 1, label: "Swing keenness (1 strict → 10 keen)" },
+  motionStopPeak: { min: 8, max: 45, step: 1, label: "Stop when motion peak ≤" },
+  motionStopS: { min: 1, max: 10, step: 0.5, label: "Stop hold time (s)" },
+  markConfirmS: { min: 2, max: 12, step: 0.5, label: "Post-swing confirm delay (s)" },
+  markConfirmMoveM: { min: 0.5, max: 8, step: 0.5, label: "Confirm move from spot (m)" }
 };
 
 // Safe storage load — never reference `courses`/`rounds` inside this helper (avoids TDZ)
@@ -1941,11 +1958,14 @@ let greenTapTimes = [];
 let courseSuggestId = null;
 let beginTeeChimedHole = null;
 
-// Hybrid auto-mark stages: watching → settling → armed → shot_triggered → marked
+// Hybrid auto-mark: motion stop → arm → swing → delayed confirm mark
 let hybridStage = "watching"; // watching | settling | armed | shot_triggered | marked
-let hybridMarkSpot = null;    // centroid at shot_triggered (mark position)
+let hybridMarkSpot = null;    // GPS spot at arm / last refine before swing
 let hybridArmedAt = 0;
+let hybridSwingAt = 0;        // last swing burst time (confirm timer)
 let hybridMarkedUntil = 0;
+let motionQuietSince = null;  // continuous-enough quiet clock start
+let motionLoudSince = null;   // spike above stop threshold (buffer)
 let motionPeakHold = 0;
 let motionPeakUpdatedAt = 0;
 let playWakeLock = null;
@@ -2050,10 +2070,13 @@ function ingestGpsFix(raw) {
   trimGpsBuf(gpsGoodBuf, now);
 
   const maxAcc = sens("gpsMaxAccuracyM");
-  if (fix.accuracy > maxAcc) {
+  // When standing still, accept slightly worse accuracy so settle/arm can proceed
+  const quietSoft = isMotionQuietForSettle();
+  const accLimit = quietSoft ? Math.max(maxAcc * 1.6, maxAcc + 10) : maxAcc;
+  if (fix.accuracy > accLimit) {
     lastGpsDeferReason = "accuracy";
     playGpsDeferTone("accuracy");
-    pushTestLog("gps_reject", { reason: "accuracy", accuracy: fix.accuracy });
+    pushTestLog("gps_reject", { reason: "accuracy", accuracy: fix.accuracy, limit: accLimit });
     return { accepted: false, reason: "accuracy", fix };
   }
 
@@ -2096,12 +2119,17 @@ function maybeToastGpsDefer(msg) {
   showToast(msg);
 }
 
-/** Settle cluster: good fixes within dwell window, all near centroid. */
-function getSettleCluster() {
+/** Settle cluster: good fixes within dwell window, all near centroid.
+ *  opts.loose — wider radius + fall back to recent fixes when standing still. */
+function getSettleCluster(opts) {
+  const loose = !!(opts && opts.loose);
   const dwellMs = sens("autoMarkDwellS") * 1000;
-  const settleM = sens("autoMarkSettleM");
+  const settleM = sens("autoMarkSettleM") * (loose ? 1.75 : 1);
   const now = Date.now();
-  const windowPts = gpsGoodBuf.filter(p => now - p.t <= dwellMs);
+  let windowPts = gpsGoodBuf.filter(p => now - p.t <= dwellMs);
+  if (loose && windowPts.length < 3) {
+    windowPts = gpsRecentBuf.filter(p => now - p.t <= dwellMs);
+  }
   if (windowPts.length < 3) {
     return { settled: false, progress: windowPts.length / 3, centroid: null, count: windowPts.length, reason: "samples" };
   }
@@ -6844,43 +6872,101 @@ function setToneLegend(text, logType, data) {
   updateAmStageUI();
 }
 
-/** Motion quiet enough to count as stopped (not pocket walking). */
+/** Peak at/under stop threshold (primary real-world stop signal). */
+function isMotionBelowStopPeak() {
+  return motionPeakHold <= sens("motionStopPeak");
+}
+
+/**
+ * Update quiet clock with buffer: brief spikes above threshold do not reset.
+ * Returns { quiet, quietMs, progress } for stage machine.
+ */
+function tickMotionStopClock(now) {
+  updateMotionPeakHold();
+  if (isMotionBelowStopPeak()) {
+    motionLoudSince = null;
+    if (!motionQuietSince) motionQuietSince = now;
+  } else {
+    if (!motionLoudSince) motionLoudSince = now;
+    if (now - motionLoudSince >= MOTION_QUIET_BUFFER_MS) {
+      motionQuietSince = null;
+      motionLoudSince = null;
+    }
+  }
+  const quiet = !!motionQuietSince;
+  const quietMs = quiet ? now - motionQuietSince : 0;
+  const needMs = Math.max(500, sens("motionStopS") * 1000);
+  return {
+    quiet,
+    quietMs,
+    progress: quiet ? Math.min(1, quietMs / needMs) : 0,
+    needMs
+  };
+}
+
+function motionQuietProgress() {
+  if (!motionQuietSince) return 0;
+  const needMs = Math.max(500, sens("motionStopS") * 1000);
+  return Math.min(1, (Date.now() - motionQuietSince) / needMs);
+}
+
+/** Soft GPS accuracy gate when standing still (does not decide arm). */
 function isMotionQuietForSettle() {
-  const { mag, variance } = getMotionStats();
-  if (variance >= 2.0) return false;
-  if (mag >= 4.0) return false;
-  if (motionPeakHold >= 50) return false;
-  return true;
+  return isMotionBelowStopPeak() && !!motionQuietSince;
+}
+
+function pickHybridMarkSpot(cluster) {
+  if (cluster && cluster.centroid) {
+    return { lat: cluster.centroid.lat, lon: cluster.centroid.lon, accuracy: cluster.centroid.accuracy };
+  }
+  const loose = getSettleCluster({ loose: true });
+  if (loose.centroid) {
+    return { lat: loose.centroid.lat, lon: loose.centroid.lon, accuracy: loose.centroid.accuracy };
+  }
+  const markPos = getBestMarkPosition();
+  if (markPos) return { lat: markPos.lat, lon: markPos.lon, accuracy: markPos.accuracy };
+  if (currentPosition) {
+    return { lat: currentPosition.lat, lon: currentPosition.lon, accuracy: currentPosition.accuracy };
+  }
+  if (gpsRecentBuf.length) {
+    const last = gpsRecentBuf[gpsRecentBuf.length - 1];
+    return { lat: last.lat, lon: last.lon, accuracy: last.accuracy };
+  }
+  return null;
+}
+
+function metresFromMarkSpot() {
+  if (!hybridMarkSpot) return null;
+  const pos = getBestMarkPosition() || currentPosition
+    || (gpsRecentBuf.length ? gpsRecentBuf[gpsRecentBuf.length - 1] : null);
+  if (!pos) return null;
+  return haversine(hybridMarkSpot.lat, hybridMarkSpot.lon, pos.lat, pos.lon);
 }
 
 function hybridStageTitle() {
-  const cluster = getSettleCluster();
   const stage = hybridStage;
   if (stage === "settling") {
-    const rem = cluster.reason === "dwell"
-      ? Math.max(1, Math.ceil((1 - cluster.progress) * sens("autoMarkDwellS")))
-      : Math.max(1, Math.ceil((1 - Math.min(1, cluster.progress)) * sens("autoMarkDwellS")));
+    const rem = Math.max(1, Math.ceil((1 - motionQuietProgress()) * sens("motionStopS")));
     return `SETTLING ${rem}s`;
   }
   if (stage === "armed") return "ARMED";
-  if (stage === "shot_triggered") return "SHOT TRIGGERED";
+  if (stage === "shot_triggered") {
+    const confS = sens("markConfirmS");
+    const elapsed = hybridSwingAt ? (Date.now() - hybridSwingAt) / 1000 : 0;
+    const rem = Math.max(0, Math.ceil(confS - elapsed));
+    return rem > 0 ? `CONFIRMING ${rem}s` : "CONFIRMING…";
+  }
   if (stage === "marked") return "MARKED";
   return "WATCHING";
 }
 
 function hybridStageMetaText() {
-  const cluster = getSettleCluster();
-  const gpsPct = computeGpsScore();
   const motPct = Math.round(motionPeakHold);
-  let fromSpot = "—";
-  if (hybridMarkSpot) {
-    const pos = getBestMarkPosition() || currentPosition;
-    if (pos) {
-      fromSpot = haversine(hybridMarkSpot.lat, hybridMarkSpot.lon, pos.lat, pos.lon).toFixed(1) + " m";
-    }
-  }
-  const settlePct = Math.round(Math.min(100, Math.max(0, cluster.progress * 100)));
-  return `GPS settle ${settlePct}% · motion peak ${motPct}% · from spot ${fromSpot}`;
+  const stopAt = sens("motionStopPeak");
+  const away = metresFromMarkSpot();
+  const fromSpot = away == null ? "—" : away.toFixed(1) + " m";
+  const mq = Math.round(motionQuietProgress() * 100);
+  return `peak ${motPct}≤${stopAt} · quiet ${mq}% · from spot ${fromSpot}`;
 }
 
 function updateAmStageUI() {
@@ -6910,24 +6996,20 @@ function updateAmStageUI() {
   }
 }
 
-/** Test mode only: rising pitch/tempo while stopped + GPS dwell. */
+/** Test mode: rising tempo while motion-stop countdown runs. */
 function tickSettleTempoAudio(cluster) {
   if (!settings.testMode || !settings.markSound) {
     settleTempoWasSettling = false;
     return;
   }
-  const settling = hybridStage === "settling"
-    && cluster
-    && cluster.reason === "dwell"
-    && cluster.progress > 0.05
-    && !cluster.settled;
+  const progress = motionQuietProgress();
+  const settling = hybridStage === "settling" && progress > 0.05 && progress < 1;
   if (!settling) {
     settleTempoWasSettling = false;
     return;
   }
   settleTempoWasSettling = true;
-  const progress = Math.min(1, Math.max(0, cluster.progress));
-  const intervalMs = 780 - progress * 560; // ~780ms → ~220ms
+  const intervalMs = 780 - progress * 560;
   const now = Date.now();
   if (now - settleTempoLastAt < intervalMs) return;
   settleTempoLastAt = now;
@@ -6948,10 +7030,13 @@ function tickSettleTempoAudio(cluster) {
   osc.stop(t0 + 0.07);
   lastToneLegend = "Settle countdown";
   updateAmStageUI();
-  // Log at most ~1/s so the export stays readable
   const lastLog = testPlayLog.length ? testPlayLog[testPlayLog.length - 1] : null;
   if (!lastLog || lastLog.type !== "settle_tick" || (Date.now() - testPlayLogStartedAt - lastLog.t) > 900) {
-    pushTestLog("settle_tick", { progress: Math.round(progress * 100), legend: lastToneLegend });
+    pushTestLog("settle_tick", {
+      progress: Math.round(progress * 100),
+      peak: Math.round(motionPeakHold),
+      legend: lastToneLegend
+    });
   }
 }
 
@@ -7050,7 +7135,10 @@ function resetHybridArm() {
   hybridStage = "watching";
   hybridMarkSpot = null;
   hybridArmedAt = 0;
+  hybridSwingAt = 0;
   hybridMarkedUntil = 0;
+  motionQuietSince = null;
+  motionLoudSince = null;
   settleTempoWasSettling = false;
   lastToneLegend = "";
 }
@@ -7378,6 +7466,9 @@ function noteMarkEvent() {
   settleSince = null;
   hybridMarkSpot = null;
   hybridArmedAt = 0;
+  hybridSwingAt = 0;
+  motionQuietSince = null;
+  motionLoudSince = null;
   hybridStage = "marked";
   hybridMarkedUntil = now + HYBRID_MARKED_FLASH_MS;
   settleTempoWasSettling = false;
@@ -7429,22 +7520,26 @@ function ensureAutoMarkSettleTick() {
   }, 250);
 }
 
-/** 5 dots collapse outside→in while GPS settling; color red→green. */
+/** 5 dots: motion-stop progress while settling; full when armed+. */
 function getAutoMarkCountdownState() {
   if (!settings.autoMark || !autoMarkWatching || isTeeingOff || !currentRound) {
     return { show: false };
   }
   if (!anchorPosition) return { show: false };
-  const markPos = getBestMarkPosition();
-  if (!markPos) return { show: false };
-  const plaus = checkShotPlausibility(anchorPosition, markPos);
-  if (!plaus.ok && plaus.reason === "tooclose") return { show: false };
-  const cluster = getSettleCluster();
-  if (cluster.progress <= 0 && !cluster.settled && hybridStage === "watching") return { show: false };
-  const progress = Math.min(1, Math.max(0, cluster.progress));
   const armedLike = hybridStage === "armed" || hybridStage === "shot_triggered" || hybridStage === "marked";
-  const remaining = armedLike ? 1 : Math.max(1, 5 - Math.floor(progress * 5));
-  return { show: true, remaining, progress: armedLike ? 1 : progress };
+  if (hybridStage === "watching") {
+    const p = motionQuietProgress();
+    if (p <= 0) return { show: false };
+    const remaining = Math.max(1, 5 - Math.floor(p * 5));
+    return { show: true, remaining, progress: p };
+  }
+  if (hybridStage === "settling") {
+    const p = motionQuietProgress();
+    const remaining = Math.max(1, 5 - Math.floor(p * 5));
+    return { show: true, remaining, progress: p };
+  }
+  if (armedLike) return { show: true, remaining: 1, progress: 1 };
+  return { show: false };
 }
 
 function paintAmDots(rootId, state) {
@@ -7626,7 +7721,7 @@ function stopAutoMarkWatch() {
   updateGpsDiagUI();
 }
 
-/** Hybrid stages: watching → settling → armed → shot_triggered → marked @ 1 m. */
+/** Motion-led stages: stop hold → armed → swing → confirm delay + GPS move → mark. */
 function updateHybridAutoMark() {
   if (!autoMarkWatching || !currentRound || isTeeingOff) return;
   if (document.getElementById("modal-confirm")?.classList.contains("active")) return;
@@ -7635,10 +7730,9 @@ function updateHybridAutoMark() {
   if (!anchorPosition) return;
 
   const cluster = getSettleCluster();
-  updateMotionPeakHold();
+  const looseCluster = getSettleCluster({ loose: true });
   const now = Date.now();
-  const quiet = isMotionQuietForSettle();
-  const gpsBuilding = cluster.reason === "dwell" || (cluster.reason === "samples" && cluster.progress > 0.05);
+  const stop = tickMotionStopClock(now);
 
   if (hybridStage === "marked") {
     if (now >= hybridMarkedUntil) {
@@ -7651,78 +7745,114 @@ function updateHybridAutoMark() {
     return;
   }
 
-  if (now < autoMarkCooldownUntil) {
+  // Confirm mark: wait post-swing delay + GPS moved from settle spot (no mid-shot beeps)
+  if (hybridStage === "shot_triggered" && hybridMarkSpot && hybridSwingAt) {
+    const waitMs = sens("markConfirmS") * 1000;
+    const away = metresFromMarkSpot();
+    const moved = away != null && away >= sens("markConfirmMoveM");
+    const waited = now - hybridSwingAt >= waitMs;
+    if (waited && moved) {
+      commitHybridAutoMark(hybridMarkSpot);
+      tickSettleTempoAudio(cluster);
+      updateAutoMarkCountdownUI();
+      updateGpsDiagUI();
+      return;
+    }
+    // Extra swings while confirming → restart quiet timer so we don't chime mid-routine
+    if (isSwingBurst() || motionPeakHold >= swingArmThreshold()) {
+      hybridSwingAt = now;
+      const spot = pickHybridMarkSpot(cluster.centroid ? cluster : looseCluster);
+      if (spot) hybridMarkSpot = spot;
+      pushTestLog("swing_retrigger", { motionPeak: Math.round(motionPeakHold) });
+      lastToneLegend = "Swing again — confirm reset";
+      updateAmStageUI();
+    }
+  }
+
+  if (now < autoMarkCooldownUntil && hybridStage !== "shot_triggered") {
     tickSettleTempoAudio(cluster);
     updateAutoMarkCountdownUI();
     updateGpsDiagUI();
     return;
   }
-  if (now - lastMarkAt < minAutoMarkIntervalMs()) {
+  if (now - lastMarkAt < minAutoMarkIntervalMs()
+      && hybridStage !== "shot_triggered"
+      && hybridStage !== "armed"
+      && hybridStage !== "settling") {
     tickSettleTempoAudio(cluster);
     updateAutoMarkCountdownUI();
     updateGpsDiagUI();
     return;
   }
 
-  // --- Stage machine ---
+  // Watching / settling — motion stop only; GPS just refines mark spot
   if (hybridStage === "watching" || hybridStage === "settling") {
-    if (quiet && gpsBuilding && !cluster.settled) {
+    if (stop.quiet) {
       if (hybridStage !== "settling") {
         hybridStage = "settling";
-        pushTestLog("stage_settling", { progress: Math.round(cluster.progress * 100) });
+        pushTestLog("stage_settling", {
+          progress: Math.round(stop.progress * 100),
+          motionPeak: Math.round(motionPeakHold),
+          stopPeak: sens("motionStopPeak"),
+          via: "motion"
+        });
       }
-    } else if (quiet && cluster.settled && cluster.centroid) {
-      hybridStage = "armed";
-      hybridMarkSpot = { ...cluster.centroid };
-      hybridArmedAt = now;
-      playSettleCompleteChirp();
-      setToneLegend("Armed — wait for swing", "settle_complete", { progress: 1 });
-    } else if (!quiet || cluster.reason === "spread") {
-      if (hybridStage === "settling") {
-        hybridStage = "watching";
-        pushTestLog("stage_watching", { reason: quiet ? "spread" : "motion" });
+      // Keep narrowing GPS spot while standing
+      const spot = pickHybridMarkSpot(looseCluster);
+      if (spot) hybridMarkSpot = spot;
+
+      if (stop.progress >= 1) {
+        const armSpot = pickHybridMarkSpot(cluster.settled ? cluster : looseCluster) || hybridMarkSpot;
+        if (armSpot) {
+          hybridStage = "armed";
+          hybridMarkSpot = armSpot;
+          hybridArmedAt = now;
+          playSettleCompleteChirp();
+          setToneLegend("Armed — wait for swing", "settle_complete", {
+            progress: 1,
+            via: "motion",
+            motionPeak: Math.round(motionPeakHold),
+            quietMs: stop.quietMs
+          });
+        }
       }
+    } else if (hybridStage === "settling") {
+      hybridStage = "watching";
+      hybridMarkSpot = null;
+      pushTestLog("stage_watching", { reason: "motion", motionPeak: Math.round(motionPeakHold) });
     }
   }
 
   if (hybridStage === "armed") {
-    if (cluster.settled && cluster.centroid) {
-      hybridMarkSpot = { ...cluster.centroid };
+    // Still refine GPS while waiting for swing
+    if (stop.quiet) {
+      const spot = pickHybridMarkSpot(cluster.settled && cluster.centroid ? cluster : looseCluster);
+      if (spot) hybridMarkSpot = spot;
     }
     if (isSwingBurst() || motionPeakHold >= swingArmThreshold()) {
       hybridStage = "shot_triggered";
-      if (cluster.centroid) hybridMarkSpot = { ...cluster.centroid };
-      else if (!hybridMarkSpot && cluster.centroid) hybridMarkSpot = { ...cluster.centroid };
+      hybridSwingAt = now;
+      const spot = pickHybridMarkSpot(cluster.centroid ? cluster : looseCluster);
+      if (spot) hybridMarkSpot = spot;
+      // Soft confirm only in test mode — loud mark beeps wait for confirm delay
       playShotTriggeredTone();
-      setToneLegend("Shot triggered — walk away", "shot_triggered", {
-        motionPeak: Math.round(motionPeakHold),
-        mag: getMotionStats().mag,
-        gps: computeGpsScore()
-      });
-    } else {
-      // Leave without swing → watching (need clearer walk than mark distance)
-      const pos = getBestMarkPosition() || currentPosition;
-      if (hybridMarkSpot && pos) {
-        const away = haversine(hybridMarkSpot.lat, hybridMarkSpot.lon, pos.lat, pos.lon);
-        const leaveNoSwingM = Math.max(HYBRID_LEAVE_M * 3, sens("autoMarkSettleM"));
-        if (away >= leaveNoSwingM && !cluster.settled) {
-          hybridStage = "watching";
-          hybridMarkSpot = null;
-          hybridArmedAt = 0;
-          lastToneLegend = "";
-          pushTestLog("stage_watching", { reason: "leave_no_swing" });
+      setToneLegend(
+        `Shot seen — wait ${sens("markConfirmS")}s + move`,
+        "shot_triggered",
+        {
+          motionPeak: Math.round(motionPeakHold),
+          mag: getMotionStats().mag,
+          confirmS: sens("markConfirmS"),
+          moveM: sens("markConfirmMoveM")
         }
-      }
-    }
-  }
-
-  if (hybridStage === "shot_triggered" && hybridMarkSpot) {
-    const pos = getBestMarkPosition() || currentPosition;
-    if (pos) {
-      const away = haversine(hybridMarkSpot.lat, hybridMarkSpot.lon, pos.lat, pos.lon);
-      if (away >= HYBRID_LEAVE_M) {
-        commitHybridAutoMark(hybridMarkSpot);
-      }
+      );
+    } else if (!stop.quiet) {
+      // Walked off without a swing burst
+      hybridStage = "watching";
+      hybridMarkSpot = null;
+      hybridArmedAt = 0;
+      lastToneLegend = "";
+      pushTestLog("stage_watching", { reason: "leave_no_swing", motionPeak: Math.round(motionPeakHold) });
     }
   }
 
@@ -7746,6 +7876,7 @@ function commitHybridAutoMark(centroid) {
       playGpsDeferTone("unusual");
     }
     if (plaus.reason === "tooclose") {
+      pushTestLog("mark_deferred", { reason: "tooclose", dist: Math.round(plaus.dist) });
       // Still too close — stay in shot_triggered, wait for more walk
       return;
     }
