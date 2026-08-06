@@ -473,6 +473,33 @@
       cursor: grab;
     }
     #map-canvas.dragging { cursor: grabbing; }
+    .map-hole-fab {
+      position: absolute;
+      bottom: 12px;
+      z-index: 5;
+      width: 48px;
+      height: 48px;
+      border-radius: 50%;
+      border: 1px solid rgba(255,255,255,0.25);
+      background: rgba(15, 20, 25, 0.72);
+      color: #fff;
+      font-size: 22px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      backdrop-filter: blur(6px);
+      -webkit-backdrop-filter: blur(6px);
+      touch-action: manipulation;
+      padding: 0;
+    }
+    .map-hole-fab:disabled {
+      opacity: 0.35;
+      cursor: default;
+    }
+    #map-fab-prev { left: 12px; }
+    #map-fab-next { right: 12px; }
     .map-legend {
       font-size: 12px;
       color: var(--muted);
@@ -657,7 +684,48 @@
       word-break: break-word;
     }
     .pocket-lock-diag.show { display: block; }
+    .pocket-lock-stage {
+      display: none;
+      margin: 0 auto 10px;
+      max-width: 320px;
+    }
+    .pocket-lock-stage.show { display: block; }
+    .pocket-lock-stage-title {
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      color: var(--accent);
+      margin-bottom: 4px;
+    }
+    .pocket-lock-tone {
+      font-size: 13px;
+      color: var(--text);
+      margin-bottom: 4px;
+      min-height: 1.3em;
+    }
+    .pocket-lock-stage-meta {
+      font-size: 12px;
+      color: var(--muted);
+      line-height: 1.35;
+    }
     #gps-diag-line.show { display: block !important; }
+    #am-stage-line {
+      display: none;
+      margin-top: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--accent);
+      line-height: 1.35;
+    }
+    #am-stage-line.show { display: block; }
+    #am-tone-line {
+      display: none;
+      margin-top: 4px;
+      font-size: 12px;
+      color: var(--muted);
+      line-height: 1.35;
+    }
+    #am-tone-line.show { display: block; }
     .sens-presets {
       display: flex;
       gap: 8px;
@@ -1394,6 +1462,8 @@
       <div class="status" id="drive-stability-display" style="margin-top:6px"></div>
       <div class="status warn" id="auto-mark-status"></div>
       <div class="status" id="gps-diag-line" style="display:none;margin-top:6px;font-size:12px;line-height:1.35"></div>
+      <div id="am-stage-line"></div>
+      <div id="am-tone-line"></div>
       <div id="auto-mark-countdown" class="am-countdown" aria-hidden="true" title="Auto-mark countdown">
         <span class="am-dot" data-i="0"></span>
         <span class="am-dot" data-i="1"></span>
@@ -1435,6 +1505,11 @@
       <div class="pocket-lock-dist" id="pocket-lock-distance">—</div>
       <div class="pocket-lock-sub" id="pocket-lock-hole">Shot mode</div>
       <div class="pocket-lock-club" id="pocket-lock-club"></div>
+      <div class="pocket-lock-stage" id="pocket-lock-stage">
+        <div class="pocket-lock-stage-title" id="pocket-lock-stage-title">WATCHING</div>
+        <div class="pocket-lock-tone" id="pocket-lock-tone"></div>
+        <div class="pocket-lock-stage-meta" id="pocket-lock-stage-meta"></div>
+      </div>
       <div class="pocket-lock-diag" id="pocket-lock-diag"></div>
       <div id="pocket-lock-am-countdown" class="am-countdown" aria-hidden="true" title="Auto-mark countdown">
         <span class="am-dot" data-i="0"></span>
@@ -1551,11 +1626,7 @@
   <div id="modal-map" class="modal map-modal">
     <div class="modal-content">
       <div class="header" style="margin-bottom:8px">
-        <div style="display:flex;align-items:center;gap:8px;min-width:0;flex:1">
-          <button type="button" class="btn-secondary" style="padding:10px 12px" id="btn-map-prev" onclick="mapStepHole(-1)" aria-label="Previous hole">←</button>
-          <h3 id="map-title" style="margin:0;flex:1;text-align:center">Hole Map</h3>
-          <button type="button" class="btn-secondary" style="padding:10px 12px" id="btn-map-next" onclick="mapStepHole(1)" aria-label="Next hole">→</button>
-        </div>
+        <h3 id="map-title" style="margin:0;flex:1;text-align:center">Hole Map</h3>
         <button class="btn-secondary" style="padding:10px 14px" onclick="closeMapModal()">Close</button>
       </div>
       <div class="map-toolbar" id="map-toolbar-main">
@@ -1580,6 +1651,8 @@
       </div>
       <div id="map-canvas-wrap">
         <canvas id="map-canvas"></canvas>
+        <button type="button" class="map-hole-fab" id="map-fab-prev" onclick="mapStepHole(-1)" aria-label="Previous hole">←</button>
+        <button type="button" class="map-hole-fab" id="map-fab-next" onclick="mapStepHole(1)" aria-label="Next hole">→</button>
       </div>
       <div class="map-legend">
         <span class="leg-tee">Tee</span>
@@ -1629,7 +1702,7 @@
   </div>
 
 <script>
-const APP_VERSION = "1.5.5";
+const APP_VERSION = "1.5.6";
 const PAGES_URL = "https://azzabazza11.github.io/golf-tracker/";
 const FEEDBACK_EMAIL = "aaron.callinan@gmail.com";
 const SUPPORT_URL = "https://ko-fi.com/aaroncallinan";
@@ -1660,6 +1733,8 @@ const BACKUP_FORMAT = "gst-backup-v1";
 const TEST_LOG_FORMAT = "gst-test-log-v1";
 const TEST_LOG_MAX = 2500;
 const MOTION_PEAK_HALFLIFE_S = 1.6;
+const HYBRID_LEAVE_M = 1;
+const HYBRID_MARKED_FLASH_MS = 1800;
 
 const SENSITIVITY_DEFAULTS = {
   autoMarkSettleM: 3,
@@ -1835,7 +1910,6 @@ let mapPointers = new Map();
 let mapLastPinchDist = null;
 let mapLastPinchMid = null; // client coords midpoint while pinching
 let mapGesturesBound = false;
-let mapSwipeStart = null; // { x, y, t } for hole-step swipe
 let mapGeoOrigin = null;
 let mapHitShots = []; // { shotIndex, x, y, r } in CSS canvas pixels
 let mapDragShot = null; // { pointerId, shotIndex }
@@ -1867,15 +1941,17 @@ let greenTapTimes = [];
 let courseSuggestId = null;
 let beginTeeChimedHole = null;
 
-// Hybrid auto-mark: settle + swing arm + walk-away commit
-let hybridSwingArmed = false;
-let hybridArmedCentroid = null;
+// Hybrid auto-mark stages: watching → settling → armed → shot_triggered → marked
+let hybridStage = "watching"; // watching | settling | armed | shot_triggered | marked
+let hybridMarkSpot = null;    // centroid at shot_triggered (mark position)
 let hybridArmedAt = 0;
+let hybridMarkedUntil = 0;
 let motionPeakHold = 0;
 let motionPeakUpdatedAt = 0;
 let playWakeLock = null;
 let settleTempoLastAt = 0;
 let settleTempoWasSettling = false;
+let lastToneLegend = "";
 let testHeartbeatLastAt = 0;
 let testPlayLog = [];
 let testPlayLogStartedAt = null;
@@ -2198,7 +2274,7 @@ function computeMarkScores(zone) {
   const cluster = getSettleCluster();
   const markPos = getBestMarkPosition();
   const swingOk = motion >= swingArmThreshold() || isSwingBurst();
-  let wouldMark = cluster.settled && swingOk && hybridSwingArmed;
+  let wouldMark = cluster.settled && swingOk && (hybridStage === "armed" || hybridStage === "shot_triggered");
   if (anchorPosition && markPos) {
     const plaus = checkShotPlausibility(anchorPosition, markPos);
     wouldMark = wouldMark && plaus.ok;
@@ -2208,7 +2284,7 @@ function computeMarkScores(zone) {
     motion,
     combined,
     threshold: CAL_MARK_THRESHOLD,
-    swingArmed: hybridSwingArmed,
+    swingArmed: hybridStage === "armed" || hybridStage === "shot_triggered",
     swingOk,
     wouldMark,
     weights: { gps: zone === "green" ? 0.3 : CAL_GPS_WEIGHT_FAIRWAY, motion: zone === "green" ? 0.7 : CAL_MOTION_WEIGHT_FAIRWAY }
@@ -4259,6 +4335,7 @@ function applyMockPosition(pos) {
   updateLiveDistance();
   updateAutoMarkCountdownUI();
   updateGpsDiagUI();
+  if (autoMarkWatching) updateHybridAutoMark();
   pushCalibrationGpsSample();
   if (calRecording) updateCalibrationOverlayUI();
   maybeRedrawLiveMap();
@@ -4356,6 +4433,7 @@ function startGPS() {
       updateLiveDistance();
       updateAutoMarkCountdownUI();
       updateGpsDiagUI();
+      if (autoMarkWatching) updateHybridAutoMark();
       pushCalibrationGpsSample();
       if (calRecording) updateCalibrationOverlayUI();
       recordTestEvent("gps_fix");
@@ -5029,8 +5107,8 @@ function getMapSessionRound() {
 
 function updateMapHoleNavButtons() {
   const round = getMapSessionRound();
-  const prev = document.getElementById("btn-map-prev");
-  const next = document.getElementById("btn-map-next");
+  const prev = document.getElementById("map-fab-prev");
+  const next = document.getElementById("map-fab-next");
   if (!prev || !next || !mapSession || !round?.holes?.length) {
     if (prev) prev.disabled = true;
     if (next) next.disabled = true;
@@ -6043,10 +6121,8 @@ function bindMapGestures() {
 
     canvas.setPointerCapture(e.pointerId);
     mapPointers.set(e.pointerId, { x: e.clientX, y: e.clientY, t: Date.now() });
-    mapSwipeStart = { x: e.clientX, y: e.clientY, t: Date.now() };
     canvas.classList.add("dragging");
     if (mapPointers.size === 2) {
-      mapSwipeStart = null;
       const pts = [...mapPointers.values()];
       mapLastPinchDist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
       mapLastPinchMid = {
@@ -6108,29 +6184,7 @@ function bindMapGestures() {
       canvas.classList.remove("dragging");
       if (mapSession && mapSession.persistRounds) saveData();
       if (currentRound) updatePlayUI();
-      mapSwipeStart = null;
       return;
-    }
-
-    // One-finger horizontal swipe → step holes
-    if (mapSwipeStart && mapPointers.size === 1 && mapPointers.has(e.pointerId) && !mapTapMode) {
-      const start = mapSwipeStart;
-      const dx = e.clientX - start.x;
-      const dy = e.clientY - start.y;
-      const dt = Math.max(1, Date.now() - start.t);
-      const speed = Math.abs(dx) / dt;
-      const h = mapSession && ensureCourseHole(mapSession.holeIndex, mapSession.course);
-      const locked = !!(h && h.mapLocked);
-      // Unlocked pan: require quicker flick so it doesn't fight drag
-      const thresh = locked ? 56 : 80;
-      const minSpeed = locked ? 0.15 : 0.35;
-      if (Math.abs(dx) >= thresh && Math.abs(dx) > Math.abs(dy) * 1.4 && speed >= minSpeed) {
-        mapPointers.delete(e.pointerId);
-        mapSwipeStart = null;
-        canvas.classList.remove("dragging");
-        mapStepHole(dx < 0 ? 1 : -1);
-        return;
-      }
     }
 
     mapPointers.delete(e.pointerId);
@@ -6141,7 +6195,6 @@ function bindMapGestures() {
     if (mapPointers.size === 0) {
       canvas.classList.remove("dragging");
       persistMapAlign();
-      mapSwipeStart = null;
     }
   }
   canvas.addEventListener("pointerup", endPointer);
@@ -6465,6 +6518,7 @@ function updatePocketLockInfo() {
     }
   }
   updateGpsDiagUI();
+  updateAmStageUI();
 }
 
 function unlockPocketLock() {
@@ -6724,7 +6778,7 @@ function playTeeNearbyChime() {
   }
 }
 
-/** Walk-away confirm — GPS + motion left the settle spot (before shot beeps). */
+/** Walk-away confirm — GPS left the mark spot (before shot beeps). */
 function playWalkAwayChime() {
   if (!settings.autoMark || !settings.markSound) return;
   ensureAudioCtx();
@@ -6742,36 +6796,132 @@ function playWalkAwayChime() {
   gain.connect(audioCtx.destination);
   osc.start(t0);
   osc.stop(t0 + 0.22);
-  pushTestLog("walk_away_chime", {});
 }
 
-/** Test mode only: rising pitch/tempo while GPS settle progress advances. */
+/** Soft swing-confirm once when entering shot_triggered (test mode). */
+function playShotTriggeredTone() {
+  if (!settings.testMode || !settings.markSound) return;
+  ensureAudioCtx();
+  if (!audioCtx) return;
+  const notes = [660, 880];
+  notes.forEach((freq, i) => {
+    const t0 = audioCtx.currentTime + i * 0.09;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = "sine";
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(0.0001, t0);
+    gain.gain.exponentialRampToValueAtTime(0.11, t0 + 0.015);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.1);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start(t0);
+    osc.stop(t0 + 0.11);
+  });
+}
+
+function playSettleCompleteChirp() {
+  if (!settings.testMode || !settings.markSound) return;
+  ensureAudioCtx();
+  if (!audioCtx) return;
+  const t0 = audioCtx.currentTime;
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = "sine";
+  osc.frequency.value = 990;
+  gain.gain.setValueAtTime(0.0001, t0);
+  gain.gain.exponentialRampToValueAtTime(0.12, t0 + 0.01);
+  gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.08);
+  osc.connect(gain);
+  gain.connect(audioCtx.destination);
+  osc.start(t0);
+  osc.stop(t0 + 0.1);
+}
+
+function setToneLegend(text, logType, data) {
+  lastToneLegend = text || "";
+  if (logType) pushTestLog(logType, { ...(data || {}), legend: lastToneLegend, stage: hybridStage });
+  updateAmStageUI();
+}
+
+/** Motion quiet enough to count as stopped (not pocket walking). */
+function isMotionQuietForSettle() {
+  const { mag, variance } = getMotionStats();
+  if (variance >= 2.0) return false;
+  if (mag >= 4.0) return false;
+  if (motionPeakHold >= 50) return false;
+  return true;
+}
+
+function hybridStageTitle() {
+  const cluster = getSettleCluster();
+  const stage = hybridStage;
+  if (stage === "settling") {
+    const rem = cluster.reason === "dwell"
+      ? Math.max(1, Math.ceil((1 - cluster.progress) * sens("autoMarkDwellS")))
+      : Math.max(1, Math.ceil((1 - Math.min(1, cluster.progress)) * sens("autoMarkDwellS")));
+    return `SETTLING ${rem}s`;
+  }
+  if (stage === "armed") return "ARMED";
+  if (stage === "shot_triggered") return "SHOT TRIGGERED";
+  if (stage === "marked") return "MARKED";
+  return "WATCHING";
+}
+
+function hybridStageMetaText() {
+  const cluster = getSettleCluster();
+  const gpsPct = computeGpsScore();
+  const motPct = Math.round(motionPeakHold);
+  let fromSpot = "—";
+  if (hybridMarkSpot) {
+    const pos = getBestMarkPosition() || currentPosition;
+    if (pos) {
+      fromSpot = haversine(hybridMarkSpot.lat, hybridMarkSpot.lon, pos.lat, pos.lon).toFixed(1) + " m";
+    }
+  }
+  const settlePct = Math.round(Math.min(100, Math.max(0, cluster.progress * 100)));
+  return `GPS settle ${settlePct}% · motion peak ${motPct}% · from spot ${fromSpot}`;
+}
+
+function updateAmStageUI() {
+  const testOn = !!(settings.testMode && settings.autoMark && autoMarkWatching && !isTeeingOff);
+  const showLock = !!(pocketLocked && testOn);
+  const stageEl = document.getElementById("pocket-lock-stage");
+  const titleEl = document.getElementById("pocket-lock-stage-title");
+  const toneEl = document.getElementById("pocket-lock-tone");
+  const metaEl = document.getElementById("pocket-lock-stage-meta");
+  if (stageEl) stageEl.classList.toggle("show", showLock);
+  if (showLock) {
+    if (titleEl) titleEl.textContent = hybridStageTitle();
+    if (toneEl) toneEl.textContent = lastToneLegend ? ("Tone: " + lastToneLegend) : "";
+    if (metaEl) metaEl.textContent = hybridStageMetaText();
+  }
+
+  const playStage = document.getElementById("am-stage-line");
+  const playTone = document.getElementById("am-tone-line");
+  const showPlay = !!(testOn && currentRound);
+  if (playStage) {
+    playStage.classList.toggle("show", showPlay);
+    if (showPlay) playStage.textContent = hybridStageTitle();
+  }
+  if (playTone) {
+    playTone.classList.toggle("show", showPlay && !!lastToneLegend);
+    if (showPlay) playTone.textContent = lastToneLegend ? ("Tone: " + lastToneLegend) : "";
+  }
+}
+
+/** Test mode only: rising pitch/tempo while stopped + GPS dwell. */
 function tickSettleTempoAudio(cluster) {
   if (!settings.testMode || !settings.markSound) {
     settleTempoWasSettling = false;
     return;
   }
-  const settling = !!(cluster && (cluster.reason === "dwell" || cluster.reason === "spread") && cluster.progress > 0.05 && !cluster.settled);
+  const settling = hybridStage === "settling"
+    && cluster
+    && cluster.reason === "dwell"
+    && cluster.progress > 0.05
+    && !cluster.settled;
   if (!settling) {
-    if (settleTempoWasSettling && cluster && cluster.settled) {
-      // brief settle-complete chirp
-      ensureAudioCtx();
-      if (audioCtx) {
-        const t0 = audioCtx.currentTime;
-        const osc = audioCtx.createOscillator();
-        const gain = audioCtx.createGain();
-        osc.type = "sine";
-        osc.frequency.value = 990;
-        gain.gain.setValueAtTime(0.0001, t0);
-        gain.gain.exponentialRampToValueAtTime(0.12, t0 + 0.01);
-        gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.08);
-        osc.connect(gain);
-        gain.connect(audioCtx.destination);
-        osc.start(t0);
-        osc.stop(t0 + 0.1);
-      }
-      pushTestLog("settle_complete", { progress: 1 });
-    }
     settleTempoWasSettling = false;
     return;
   }
@@ -6796,6 +6946,13 @@ function tickSettleTempoAudio(cluster) {
   gain.connect(audioCtx.destination);
   osc.start(t0);
   osc.stop(t0 + 0.07);
+  lastToneLegend = "Settle countdown";
+  updateAmStageUI();
+  // Log at most ~1/s so the export stays readable
+  const lastLog = testPlayLog.length ? testPlayLog[testPlayLog.length - 1] : null;
+  if (!lastLog || lastLog.type !== "settle_tick" || (Date.now() - testPlayLogStartedAt - lastLog.t) > 900) {
+    pushTestLog("settle_tick", { progress: Math.round(progress * 100), legend: lastToneLegend });
+  }
 }
 
 /** Test mode only: muted blip when GPS jump/accuracy defer. */
@@ -6818,7 +6975,7 @@ function playGpsDeferTone(reason) {
   gain.connect(audioCtx.destination);
   osc.start(t0);
   osc.stop(t0 + 0.16);
-  pushTestLog("gps_defer_tone", { reason });
+  setToneLegend("GPS defer: " + (reason || "accuracy"), "gps_defer_tone", { reason });
 }
 
 function tickTestHeartbeat() {
@@ -6841,6 +6998,7 @@ function tickTestHeartbeat() {
   gain.connect(audioCtx.destination);
   osc.start(t0);
   osc.stop(t0 + 0.05);
+  setToneLegend("Heartbeat — still awake", "heartbeat", {});
 }
 
 function pushTestLog(type, data) {
@@ -6851,6 +7009,7 @@ function pushTestLog(type, data) {
     at: new Date().toISOString(),
     type,
     hole: currentRound ? currentHoleIndex + 1 : null,
+    stage: hybridStage,
     ...(data || {})
   });
   if (testPlayLog.length > TEST_LOG_MAX) testPlayLog = testPlayLog.slice(-TEST_LOG_MAX);
@@ -6888,9 +7047,12 @@ function onTestHeartbeatToggle(on) {
 }
 
 function resetHybridArm() {
-  hybridSwingArmed = false;
-  hybridArmedCentroid = null;
+  hybridStage = "watching";
+  hybridMarkSpot = null;
   hybridArmedAt = 0;
+  hybridMarkedUntil = 0;
+  settleTempoWasSettling = false;
+  lastToneLegend = "";
 }
 
 async function requestPlayWakeLock() {
@@ -7214,11 +7376,17 @@ function noteMarkEvent() {
   }
   lastMarkAt = now;
   settleSince = null;
-  resetHybridArm();
-  stopAutoMarkSettleTick();
+  hybridMarkSpot = null;
+  hybridArmedAt = 0;
+  hybridStage = "marked";
+  hybridMarkedUntil = now + HYBRID_MARKED_FLASH_MS;
+  settleTempoWasSettling = false;
   autoMarkCooldownUntil = now + 25000;
+  if (autoMarkWatching) ensureAutoMarkSettleTick();
+  else stopAutoMarkSettleTick();
   updateAutoMarkCountdownUI();
   updateGpsDiagUI();
+  updateAmStageUI();
 }
 
 function minAutoMarkIntervalMs() {
@@ -7245,8 +7413,13 @@ function stopAutoMarkSettleTick() {
 function ensureAutoMarkSettleTick() {
   if (autoMarkSettleTick) return;
   autoMarkSettleTick = setInterval(() => {
+    if (hybridStage === "marked" && Date.now() >= hybridMarkedUntil) {
+      hybridStage = "watching";
+      lastToneLegend = "";
+    }
     updateAutoMarkCountdownUI();
     updateGpsDiagUI();
+    updateAmStageUI();
     if (!autoMarkWatching) {
       stopAutoMarkSettleTick();
       return;
@@ -7267,10 +7440,11 @@ function getAutoMarkCountdownState() {
   const plaus = checkShotPlausibility(anchorPosition, markPos);
   if (!plaus.ok && plaus.reason === "tooclose") return { show: false };
   const cluster = getSettleCluster();
-  if (cluster.progress <= 0 && !cluster.settled) return { show: false };
+  if (cluster.progress <= 0 && !cluster.settled && hybridStage === "watching") return { show: false };
   const progress = Math.min(1, Math.max(0, cluster.progress));
-  const remaining = hybridSwingArmed ? 1 : Math.max(1, 5 - Math.floor(progress * 5));
-  return { show: true, remaining, progress: hybridSwingArmed ? 1 : progress };
+  const armedLike = hybridStage === "armed" || hybridStage === "shot_triggered" || hybridStage === "marked";
+  const remaining = armedLike ? 1 : Math.max(1, 5 - Math.floor(progress * 5));
+  return { show: true, remaining, progress: armedLike ? 1 : progress };
 }
 
 function paintAmDots(rootId, state) {
@@ -7324,6 +7498,7 @@ function updateGpsDiagUI() {
     lockEl.classList.toggle("show", show);
     if (show) lockEl.textContent = text;
   }
+  updateAmStageUI();
 }
 
 /** Motion for diagnostics + optional green tap putts only — never gates auto-mark. */
@@ -7451,7 +7626,7 @@ function stopAutoMarkWatch() {
   updateGpsDiagUI();
 }
 
-/** Hybrid: GPS settle + swing arm + walk-away → mark. */
+/** Hybrid stages: watching → settling → armed → shot_triggered → marked @ 1 m. */
 function updateHybridAutoMark() {
   if (!autoMarkWatching || !currentRound || isTeeingOff) return;
   if (document.getElementById("modal-confirm")?.classList.contains("active")) return;
@@ -7460,49 +7635,98 @@ function updateHybridAutoMark() {
   if (!anchorPosition) return;
 
   const cluster = getSettleCluster();
-  tickSettleTempoAudio(cluster);
   updateMotionPeakHold();
-
   const now = Date.now();
-  if (now < autoMarkCooldownUntil) return;
-  if (now - lastMarkAt < minAutoMarkIntervalMs()) {
+  const quiet = isMotionQuietForSettle();
+  const gpsBuilding = cluster.reason === "dwell" || (cluster.reason === "samples" && cluster.progress > 0.05);
+
+  if (hybridStage === "marked") {
+    if (now >= hybridMarkedUntil) {
+      hybridStage = "watching";
+      lastToneLegend = "";
+    }
+    tickSettleTempoAudio(cluster);
     updateAutoMarkCountdownUI();
+    updateGpsDiagUI();
     return;
   }
 
-  // Arm when settled and swing-like motion while at the ball
-  if (cluster.settled && cluster.centroid) {
-    if (isSwingBurst() || motionPeakHold >= swingArmThreshold()) {
-      if (!hybridSwingArmed) {
-        hybridSwingArmed = true;
-        hybridArmedCentroid = { ...cluster.centroid };
-        hybridArmedAt = now;
-        pushTestLog("swing_armed", {
-          motionPeak: Math.round(motionPeakHold),
-          mag: getMotionStats().mag,
-          gps: computeGpsScore()
-        });
-      } else {
-        hybridArmedCentroid = { ...cluster.centroid };
+  if (now < autoMarkCooldownUntil) {
+    tickSettleTempoAudio(cluster);
+    updateAutoMarkCountdownUI();
+    updateGpsDiagUI();
+    return;
+  }
+  if (now - lastMarkAt < minAutoMarkIntervalMs()) {
+    tickSettleTempoAudio(cluster);
+    updateAutoMarkCountdownUI();
+    updateGpsDiagUI();
+    return;
+  }
+
+  // --- Stage machine ---
+  if (hybridStage === "watching" || hybridStage === "settling") {
+    if (quiet && gpsBuilding && !cluster.settled) {
+      if (hybridStage !== "settling") {
+        hybridStage = "settling";
+        pushTestLog("stage_settling", { progress: Math.round(cluster.progress * 100) });
+      }
+    } else if (quiet && cluster.settled && cluster.centroid) {
+      hybridStage = "armed";
+      hybridMarkSpot = { ...cluster.centroid };
+      hybridArmedAt = now;
+      playSettleCompleteChirp();
+      setToneLegend("Armed — wait for swing", "settle_complete", { progress: 1 });
+    } else if (!quiet || cluster.reason === "spread") {
+      if (hybridStage === "settling") {
+        hybridStage = "watching";
+        pushTestLog("stage_watching", { reason: quiet ? "spread" : "motion" });
       }
     }
-  } else if (!hybridSwingArmed && (cluster.reason === "spread" || cluster.reason === "samples")) {
-    // lost settle before arming — reset tempo context only
   }
 
-  // Commit on walk-away after armed
-  if (hybridSwingArmed && hybridArmedCentroid) {
-    const leaveM = Math.max(sens("autoMarkSettleM") * 1.35, 4);
-    const pos = getBestMarkPosition() || currentPosition;
-    if (!pos) return;
-    const away = haversine(hybridArmedCentroid.lat, hybridArmedCentroid.lon, pos.lat, pos.lon);
-    const left = !cluster.settled && away >= leaveM;
-    const walkingHard = getMotionStats().variance > 2.5 && away >= leaveM * 0.85;
-    if (left || walkingHard) {
-      commitHybridAutoMark(hybridArmedCentroid);
+  if (hybridStage === "armed") {
+    if (cluster.settled && cluster.centroid) {
+      hybridMarkSpot = { ...cluster.centroid };
+    }
+    if (isSwingBurst() || motionPeakHold >= swingArmThreshold()) {
+      hybridStage = "shot_triggered";
+      if (cluster.centroid) hybridMarkSpot = { ...cluster.centroid };
+      else if (!hybridMarkSpot && cluster.centroid) hybridMarkSpot = { ...cluster.centroid };
+      playShotTriggeredTone();
+      setToneLegend("Shot triggered — walk away", "shot_triggered", {
+        motionPeak: Math.round(motionPeakHold),
+        mag: getMotionStats().mag,
+        gps: computeGpsScore()
+      });
+    } else {
+      // Leave without swing → watching (need clearer walk than mark distance)
+      const pos = getBestMarkPosition() || currentPosition;
+      if (hybridMarkSpot && pos) {
+        const away = haversine(hybridMarkSpot.lat, hybridMarkSpot.lon, pos.lat, pos.lon);
+        const leaveNoSwingM = Math.max(HYBRID_LEAVE_M * 3, sens("autoMarkSettleM"));
+        if (away >= leaveNoSwingM && !cluster.settled) {
+          hybridStage = "watching";
+          hybridMarkSpot = null;
+          hybridArmedAt = 0;
+          lastToneLegend = "";
+          pushTestLog("stage_watching", { reason: "leave_no_swing" });
+        }
+      }
     }
   }
 
+  if (hybridStage === "shot_triggered" && hybridMarkSpot) {
+    const pos = getBestMarkPosition() || currentPosition;
+    if (pos) {
+      const away = haversine(hybridMarkSpot.lat, hybridMarkSpot.lon, pos.lat, pos.lon);
+      if (away >= HYBRID_LEAVE_M) {
+        commitHybridAutoMark(hybridMarkSpot);
+      }
+    }
+  }
+
+  tickSettleTempoAudio(cluster);
   updateAutoMarkCountdownUI();
   updateGpsDiagUI();
 }
@@ -7522,14 +7746,13 @@ function commitHybridAutoMark(centroid) {
       playGpsDeferTone("unusual");
     }
     if (plaus.reason === "tooclose") {
-      // Still too close — stay armed, wait for more walk
+      // Still too close — stay in shot_triggered, wait for more walk
       return;
     }
     resetHybridArm();
+    updateAmStageUI();
     return;
   }
-
-  playWalkAwayChime();
 
   const hole = currentRound.holes[currentHoleIndex];
   const from = { ...anchorPosition };
@@ -7557,15 +7780,20 @@ function commitHybridAutoMark(centroid) {
     shotNumber: shotNum,
     prevAnchor: from
   };
-  resetHybridArm();
+
+  playWalkAwayChime();
+  playMarkBeeps(shotNum);
   noteMarkEvent();
-  setTimeout(() => playMarkBeeps(shotNum), 220);
+  setToneLegend("Marked shot " + shotNum, "auto_mark_shot", {
+    shotNum,
+    distance: Math.round(dist),
+    motionPeak: Math.round(motionPeakHold)
+  });
   showAutoUndo();
   lastGpsDeferReason = null;
   updatePlayUI();
   if (pocketLocked) updatePocketLockInfo();
   showToast(`Auto-marked shot ${shotNum}`);
-  pushTestLog("auto_mark_shot", { shotNum, distance: Math.round(dist), motionPeak: Math.round(motionPeakHold) });
   recordTestEvent("auto_mark_shot");
 }
 
