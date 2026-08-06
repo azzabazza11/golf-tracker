@@ -647,6 +647,68 @@
       margin-bottom: 8px;
       min-height: 1.2em;
     }
+    .pocket-lock-diag {
+      display: none;
+      font-size: 11px;
+      color: var(--muted);
+      line-height: 1.35;
+      margin: 0 auto 10px;
+      max-width: 300px;
+      word-break: break-word;
+    }
+    .pocket-lock-diag.show { display: block; }
+    #gps-diag-line.show { display: block !important; }
+    .sens-presets {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin: 8px 0 12px;
+    }
+    .sens-presets button {
+      flex: 1;
+      min-width: 90px;
+      padding: 10px 8px;
+      font-size: 13px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: var(--card);
+      color: var(--text);
+      cursor: pointer;
+    }
+    .sens-presets button.active {
+      border-color: var(--accent);
+      color: var(--accent);
+      font-weight: 600;
+    }
+    .sens-row {
+      margin-bottom: 12px;
+    }
+    .sens-row label {
+      display: flex;
+      justify-content: space-between;
+      font-size: 13px;
+      margin-bottom: 4px;
+      color: var(--muted);
+    }
+    .sens-row input[type="range"] {
+      width: 100%;
+    }
+    .sens-summary {
+      font-size: 13px;
+      color: var(--muted);
+      margin-top: 4px;
+      line-height: 1.4;
+    }
+    .course-suggest {
+      display: none;
+      margin-bottom: 12px;
+    }
+    .course-suggest.show { display: block; }
+    .course-suggest .suggest-name {
+      font-weight: 600;
+      font-size: 17px;
+      margin-bottom: 4px;
+    }
     .pocket-lock-shots {
       text-align: left;
       margin: 0 auto 16px;
@@ -909,6 +971,12 @@
 
     <div id="phone-setup-banner" class="setup-banner" style="display:none"></div>
 
+    <div class="card course-suggest" id="course-suggest">
+      <div class="suggest-name" id="course-suggest-name">Nearby course</div>
+      <p class="modal-note" style="margin-bottom:10px" id="course-suggest-note">GPS matches a mapped course.</p>
+      <button type="button" class="btn-primary" style="width:100%" id="course-suggest-btn" onclick="beginSuggestedHandsOff()">Begin auto tracker</button>
+    </div>
+
     <div class="card">
       <button class="btn-primary" style="width:100%" onclick="showScreen('courses')">Start Round</button>
     </div>
@@ -968,7 +1036,7 @@
       <div class="setting-row">
         <div class="setting-text">
           <strong>Auto-mark shots</strong>
-          <span>Trial: walk then stand still to mark. Assign clubs later. Needs motion permission.</span>
+          <span>GPS settle only — no motion required. Stand still after walking to the ball; dots count down to mark.</span>
         </div>
         <label class="switch">
           <input type="checkbox" id="setting-auto-mark" onchange="onAutoMarkToggle(this.checked)">
@@ -985,6 +1053,48 @@
           <span class="slider"></span>
         </label>
       </div>
+      <div class="setting-row">
+        <div class="setting-text">
+          <strong>Hands-off preference</strong>
+          <span>Default new rounds to Hands-off: start near a known tee, flexible hole count, audio cues.</span>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="setting-hands-off" onchange="onHandsOffToggle(this.checked)">
+          <span class="slider"></span>
+        </label>
+      </div>
+      <div class="setting-row">
+        <div class="setting-text">
+          <strong>Green tap putts</strong>
+          <span>Near the pin, tap/shake the phone ~3 times to mark a putt (auto-mark on).</span>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="setting-green-tap" onchange="onGreenTapToggle(this.checked)">
+          <span class="slider"></span>
+        </label>
+      </div>
+      <div class="setting-row">
+        <div class="setting-text">
+          <strong>Voice chimes (stub)</strong>
+          <span>Reserved for spoken cues later. Chimes and beeps work today.</span>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="setting-voice" onchange="onVoiceToggle(this.checked)">
+          <span class="slider"></span>
+        </label>
+      </div>
+    </div>
+
+    <div class="card" id="sensitivity-card">
+      <h3 style="margin-bottom:6px">Auto-mark sensitivity</h3>
+      <p class="modal-note" style="margin-bottom:8px">Tune settle radius, dwell, GPS accuracy, and tee/pin zones. Use Strict for dense tee boxes.</p>
+      <div class="sens-presets" id="sens-presets">
+        <button type="button" data-preset="strict" onclick="applySensPreset('strict')">Strict</button>
+        <button type="button" data-preset="balanced" onclick="applySensPreset('balanced')">Balanced</button>
+        <button type="button" data-preset="forgiving" onclick="applySensPreset('forgiving')">Forgiving</button>
+      </div>
+      <div id="sens-sliders"></div>
+      <p class="sens-summary" id="sens-summary"></p>
     </div>
 
     <div class="card">
@@ -1125,6 +1235,7 @@
       <div class="status good" id="current-club-display" style="margin-top:6px"></div>
       <div class="status" id="drive-stability-display" style="margin-top:6px"></div>
       <div class="status warn" id="auto-mark-status"></div>
+      <div class="status" id="gps-diag-line" style="display:none;margin-top:6px;font-size:12px;line-height:1.35"></div>
       <div id="auto-mark-countdown" class="am-countdown" aria-hidden="true" title="Auto-mark countdown">
         <span class="am-dot" data-i="0"></span>
         <span class="am-dot" data-i="1"></span>
@@ -1156,6 +1267,7 @@
       </div>
       <button type="button" class="btn-secondary" id="btn-setup-map" onclick="openMapSetup()" style="width:100%;margin-top:10px;display:none">Setup Map</button>
       <button type="button" class="btn-secondary" id="btn-pocket-lock" onclick="engagePocketLock()" style="width:100%;margin-top:10px;display:none">Lock screen</button>
+      <button type="button" class="btn-warning" id="btn-end-flexible" onclick="endFlexibleRoundEarly()" style="width:100%;margin-top:10px;display:none">End round here</button>
     </div>
   </div>
 
@@ -1165,6 +1277,7 @@
       <div class="pocket-lock-dist" id="pocket-lock-distance">—</div>
       <div class="pocket-lock-sub" id="pocket-lock-hole">Shot mode</div>
       <div class="pocket-lock-club" id="pocket-lock-club"></div>
+      <div class="pocket-lock-diag" id="pocket-lock-diag"></div>
       <div id="pocket-lock-am-countdown" class="am-countdown" aria-hidden="true" title="Auto-mark countdown">
         <span class="am-dot" data-i="0"></span>
         <span class="am-dot" data-i="1"></span>
@@ -1358,26 +1471,72 @@
   </div>
 
 <script>
-const APP_VERSION = "1.4.17";
+const APP_VERSION = "1.5.0";
 const PAGES_URL = "https://azzabazza11.github.io/golf-tracker/";
 const FEEDBACK_EMAIL = "aaron.callinan@gmail.com";
 const SUPPORT_URL = "https://ko-fi.com/aaroncallinan";
 const INSTALL_HINT_IOS = "On iPhone: tap Share, then Add to Home Screen.";
 const CLUBS = ["Dr","3w","5w","Hybrid","3i","4i","5i","6i","7i","8i","9i","PW","GW","SW","LW","Putter"];
-const PIN_ACCEPT_M = 10;
 const PIN_LOCK_M = 5;
 const PIN_LOCK_MIN_SAMPLES = 3;
 const DRIVE_STABLE_N = 5;
 const MOCK_ORIGIN = { lat: -36.8485, lon: 174.7633 }; // Auckland-ish for laptop tests
-const ON_GREEN_M = 15;
-const AUTO_MARK_STILL_MS = 9000;
-const NEXT_TEE_NEAR_M = 5;
-const NEXT_TEE_LEAVE_M = 12;
 const NEXT_TEE_HANDOFF_DWELL_MS = 18000;
 const NEXT_TEE_TEEOFF_DWELL_MS = 6000;
 const TEST_UNLOCK_TAPS = 7;
 const DEFAULT_MAP_ALIGN = { offsetX: 0, offsetY: 0, scale: 1, rotation: 0 };
 const DEFAULT_MAP_VIEW = { offsetX: 0, offsetY: 0, scale: 1, rotation: 0 };
+const GPS_BUF_MAX_MS = 60000;
+const GPS_MAX_FOOT_SPEED_MS = 15;
+const COURSE_DETECT_M = 120;
+const GREEN_TAP_WINDOW_MS = 900;
+const GREEN_TAP_COUNT = 3;
+
+const SENSITIVITY_DEFAULTS = {
+  autoMarkSettleM: 3,
+  autoMarkDwellS: 9,
+  autoMarkMinShotM: 8,
+  gpsMaxAccuracyM: 8,
+  teeNearM: 3,
+  teeLeaveM: 6,
+  pinAcceptM: 8,
+  onGreenM: 12
+};
+
+const SENSITIVITY_PRESETS = {
+  strict: {
+    autoMarkSettleM: 2,
+    autoMarkDwellS: 12,
+    autoMarkMinShotM: 10,
+    gpsMaxAccuracyM: 5,
+    teeNearM: 3,
+    teeLeaveM: 5,
+    pinAcceptM: 6,
+    onGreenM: 10
+  },
+  balanced: { ...SENSITIVITY_DEFAULTS },
+  forgiving: {
+    autoMarkSettleM: 5,
+    autoMarkDwellS: 7,
+    autoMarkMinShotM: 6,
+    gpsMaxAccuracyM: 15,
+    teeNearM: 5,
+    teeLeaveM: 10,
+    pinAcceptM: 12,
+    onGreenM: 18
+  }
+};
+
+const SENSITIVITY_RANGES = {
+  autoMarkSettleM: { min: 2, max: 8, step: 0.5, label: "Settle radius (m)" },
+  autoMarkDwellS: { min: 5, max: 20, step: 1, label: "Settle dwell (s)" },
+  autoMarkMinShotM: { min: 5, max: 20, step: 1, label: "Min shot move (m)" },
+  gpsMaxAccuracyM: { min: 3, max: 25, step: 1, label: "Max GPS accuracy (m)" },
+  teeNearM: { min: 2, max: 8, step: 0.5, label: "Tee near radius (m)" },
+  teeLeaveM: { min: 4, max: 15, step: 1, label: "Tee leave radius (m)" },
+  pinAcceptM: { min: 5, max: 20, step: 1, label: "Pin accept radius (m)" },
+  onGreenM: { min: 8, max: 25, step: 1, label: "On-green radius (m)" }
+};
 
 // Safe storage load — never reference `courses`/`rounds` inside this helper (avoids TDZ)
 function loadStorage(key, fallback) {
@@ -1396,19 +1555,34 @@ function loadStorage(key, fallback) {
 let courses = loadStorage("gst_courses", []);
 let rounds  = loadStorage("gst_rounds", []);
 
+function clampSens(key, val) {
+  const r = SENSITIVITY_RANGES[key];
+  const n = Number(val);
+  if (!r || !Number.isFinite(n)) return SENSITIVITY_DEFAULTS[key];
+  return Math.min(r.max, Math.max(r.min, n));
+}
+
 function loadSettings() {
   try {
     const raw = localStorage.getItem("gst_settings");
     const s = raw ? JSON.parse(raw) : {};
-    return {
+    const out = {
       autoMark: !!s.autoMark,
       markSound: s.markSound !== false,
       showWalkTrack: s.showWalkTrack !== false,
       theme: s.theme === "light" ? "light" : "dark",
       pocketLockAuto: s.pocketLockAuto !== false,
       testMode: !!s.testMode,
-      testUnlocked: !!s.testUnlocked
+      testUnlocked: !!s.testUnlocked,
+      handsOff: !!s.handsOff,
+      greenTapPutts: s.greenTapPutts !== false,
+      voiceChimes: !!s.voiceChimes,
+      sensPreset: s.sensPreset === "strict" || s.sensPreset === "forgiving" ? s.sensPreset : "balanced"
     };
+    Object.keys(SENSITIVITY_DEFAULTS).forEach(k => {
+      out[k] = clampSens(k, s[k] != null ? s[k] : SENSITIVITY_DEFAULTS[k]);
+    });
+    return out;
   } catch (e) {
     return {
       autoMark: false,
@@ -1417,7 +1591,12 @@ function loadSettings() {
       theme: "dark",
       pocketLockAuto: true,
       testMode: false,
-      testUnlocked: false
+      testUnlocked: false,
+      handsOff: false,
+      greenTapPutts: true,
+      voiceChimes: false,
+      sensPreset: "balanced",
+      ...SENSITIVITY_DEFAULTS
     };
   }
 }
@@ -1431,6 +1610,22 @@ function saveSettings() {
 }
 
 let settings = loadSettings();
+
+function sens(key) {
+  const v = settings[key];
+  return Number.isFinite(v) ? v : SENSITIVITY_DEFAULTS[key];
+}
+
+function applySensPreset(name) {
+  const p = SENSITIVITY_PRESETS[name] || SENSITIVITY_PRESETS.balanced;
+  settings.sensPreset = name;
+  Object.keys(SENSITIVITY_DEFAULTS).forEach(k => {
+    settings[k] = clampSens(k, p[k]);
+  });
+  saveSettings();
+  renderSettings();
+  showToast(name.charAt(0).toUpperCase() + name.slice(1) + " sensitivity");
+}
 
 function applyTheme() {
   const theme = settings.theme === "light" ? "light" : "dark";
@@ -1461,6 +1656,7 @@ let mapPointers = new Map();
 let mapLastPinchDist = null;
 let mapLastPinchMid = null; // client coords midpoint while pinching
 let mapGesturesBound = false;
+let mapSwipeStart = null; // { x, y, t } for hole-step swipe
 let mapGeoOrigin = null;
 let mapHitShots = []; // { shotIndex, x, y, r } in CSS canvas pixels
 let mapDragShot = null; // { pointerId, shotIndex }
@@ -1469,20 +1665,27 @@ let mapTapMode = null; // 'tee' | 'pin' | null
 let mapManualAlign = false;
 let pendingMapImageFile = null;
 
-// Auto-mark + club edit
+// Auto-mark + club edit (GPS-settle based; motion is diagnostics only)
 let autoMarkWatching = false;
 let autoMarkIntervals = []; // ms between marks
 let lastMarkAt = 0;
 let motionBuf = [];
-let walkSeen = false;
-let stillSince = null;
+let lastMotionMag = null;
+let settleSince = null;
 let autoMarkCooldownUntil = 0;
-let autoMarkStillTick = null;
+let autoMarkSettleTick = null;
 let lastAutoUndo = null;
 let undoHideTimer = null;
 let audioCtx = null;
-let motionListener = null;
+let motionListener = null; // optional diagnostics / green-tap
 let clubEditCtx = null; // { mode, roundId?, holeIndex, shotIndex }
+let gpsRecentBuf = []; // raw recent fixes { lat, lon, accuracy, t }
+let gpsGoodBuf = [];   // accepted quality fixes
+let lastGpsDeferReason = null;
+let lastGpsDeferToastAt = 0;
+let greenTapTimes = [];
+let courseSuggestId = null;
+let beginTeeChimedHole = null;
 
 // Next-tee auto-mark handoff (pocket lock continuous play)
 let lastNearPinPos = null;
@@ -1532,6 +1735,167 @@ function showToast(msg) {
   setTimeout(() => el.classList.remove("show"), 3500);
 }
 
+function trimGpsBuf(buf, now) {
+  const cut = now - GPS_BUF_MAX_MS;
+  while (buf.length && buf[0].t < cut) buf.shift();
+}
+
+function gpsCentroid(points) {
+  if (!points.length) return null;
+  const lat = points.reduce((s, p) => s + p.lat, 0) / points.length;
+  const lon = points.reduce((s, p) => s + p.lon, 0) / points.length;
+  const accuracy = Math.max(...points.map(p => p.accuracy || 99));
+  return { lat, lon, accuracy };
+}
+
+function gpsMedianPoint(points) {
+  if (!points.length) return null;
+  const lats = points.map(p => p.lat).sort((a, b) => a - b);
+  const lons = points.map(p => p.lon).sort((a, b) => a - b);
+  const mid = Math.floor(points.length / 2);
+  const lat = points.length % 2 ? lats[mid] : (lats[mid - 1] + lats[mid]) / 2;
+  const lon = points.length % 2 ? lons[mid] : (lons[mid - 1] + lons[mid]) / 2;
+  return { lat, lon };
+}
+
+/** Reject resettling spikes / impossible jumps; keep good fixes for marking. */
+function ingestGpsFix(raw) {
+  const now = Date.now();
+  const fix = {
+    lat: raw.lat,
+    lon: raw.lon,
+    accuracy: raw.accuracy != null ? raw.accuracy : 99,
+    t: now
+  };
+  gpsRecentBuf.push(fix);
+  trimGpsBuf(gpsRecentBuf, now);
+  trimGpsBuf(gpsGoodBuf, now);
+
+  const maxAcc = sens("gpsMaxAccuracyM");
+  if (fix.accuracy > maxAcc) {
+    lastGpsDeferReason = "accuracy";
+    return { accepted: false, reason: "accuracy", fix };
+  }
+
+  if (gpsGoodBuf.length) {
+    const last = gpsGoodBuf[gpsGoodBuf.length - 1];
+    const dt = Math.max(0.001, (now - last.t) / 1000);
+    const d = haversine(last.lat, last.lon, fix.lat, fix.lon);
+    if (d / dt > GPS_MAX_FOOT_SPEED_MS) {
+      lastGpsDeferReason = "jump";
+      maybeToastGpsDefer("GPS jump detected — waiting for stable fix");
+      return { accepted: false, reason: "jump", fix };
+    }
+    const med = gpsMedianPoint(gpsGoodBuf.slice(-8));
+    if (med) {
+      const jump = haversine(med.lat, med.lon, fix.lat, fix.lon);
+      const lim = Math.max(3 * fix.accuracy, 15);
+      if (jump > lim && dt < 5) {
+        lastGpsDeferReason = "jump";
+        maybeToastGpsDefer("GPS jump detected — waiting for stable fix");
+        return { accepted: false, reason: "jump", fix };
+      }
+    }
+  }
+
+  gpsGoodBuf.push(fix);
+  if (lastGpsDeferReason === "jump" || lastGpsDeferReason === "accuracy") {
+    lastGpsDeferReason = null;
+  }
+  return { accepted: true, reason: null, fix };
+}
+
+function maybeToastGpsDefer(msg) {
+  const now = Date.now();
+  if (now - lastGpsDeferToastAt < 12000) return;
+  lastGpsDeferToastAt = now;
+  showToast(msg);
+}
+
+/** Settle cluster: good fixes within dwell window, all near centroid. */
+function getSettleCluster() {
+  const dwellMs = sens("autoMarkDwellS") * 1000;
+  const settleM = sens("autoMarkSettleM");
+  const now = Date.now();
+  const windowPts = gpsGoodBuf.filter(p => now - p.t <= dwellMs);
+  if (windowPts.length < 3) {
+    return { settled: false, progress: windowPts.length / 3, centroid: null, count: windowPts.length, reason: "samples" };
+  }
+  const centroid = gpsCentroid(windowPts);
+  const maxD = Math.max(...windowPts.map(p => haversine(p.lat, p.lon, centroid.lat, centroid.lon)));
+  if (maxD > settleM) {
+    return { settled: false, progress: Math.max(0, 1 - (maxD - settleM) / settleM), centroid, count: windowPts.length, reason: "spread" };
+  }
+  const oldest = windowPts[0].t;
+  const age = now - oldest;
+  const progress = Math.min(1, age / dwellMs);
+  return {
+    settled: age >= dwellMs,
+    progress,
+    centroid,
+    count: windowPts.length,
+    reason: age >= dwellMs ? null : "dwell"
+  };
+}
+
+function getBestMarkPosition() {
+  const cluster = getSettleCluster();
+  if (cluster.centroid) return { ...cluster.centroid, fromCluster: true, settled: cluster.settled };
+  if (gpsGoodBuf.length) {
+    const last = gpsGoodBuf[gpsGoodBuf.length - 1];
+    return { lat: last.lat, lon: last.lon, accuracy: last.accuracy, fromCluster: false, settled: false };
+  }
+  if (currentPosition) {
+    return { ...currentPosition, fromCluster: false, settled: false };
+  }
+  return null;
+}
+
+function teeToPinLengthM(holeIndex) {
+  const idx = holeIndex == null ? currentHoleIndex : holeIndex;
+  const pin = getPin(idx);
+  const hole = currentRound && currentRound.holes[idx];
+  const tee = hole && hole.teePosition;
+  if (!tee || !pin) return null;
+  return haversine(tee.lat, tee.lon, pin.lat, pin.lon);
+}
+
+function checkShotPlausibility(from, to) {
+  if (!from || !to) return { ok: false, reason: "nogps" };
+  const dist = haversine(from.lat, from.lon, to.lat, to.lon);
+  const minM = sens("autoMarkMinShotM");
+  if (dist < minM) return { ok: false, reason: "tooclose", dist };
+  const holeLen = teeToPinLengthM();
+  if (holeLen != null && dist > holeLen * 1.4 && dist > 80) {
+    return { ok: false, reason: "unusual", dist, holeLen };
+  }
+  return { ok: true, dist };
+}
+
+function gpsDiagText() {
+  const acc = currentPosition && currentPosition.accuracy != null
+    ? `±${Math.round(currentPosition.accuracy)} m`
+    : "±—";
+  let fromShot = "—";
+  if (anchorPosition && currentPosition && !isTeeingOff) {
+    fromShot = Math.round(haversine(
+      anchorPosition.lat, anchorPosition.lon,
+      currentPosition.lat, currentPosition.lon
+    )) + " m from shot";
+  }
+  const cluster = getSettleCluster();
+  let settle = "idle";
+  if (settings.autoMark && autoMarkWatching && !isTeeingOff) {
+    if (cluster.settled) settle = "ready";
+    else if (cluster.reason === "dwell") settle = `settling ${Math.ceil((1 - cluster.progress) * sens("autoMarkDwellS"))}s`;
+    else if (cluster.reason === "spread") settle = "moving";
+    else settle = "acquiring";
+  }
+  const defer = lastGpsDeferReason ? ` · ${lastGpsDeferReason}` : "";
+  const motion = lastMotionMag != null ? ` · motion ref ${lastMotionMag.toFixed(1)}` : "";
+  return `${acc} · ${fromShot} · ${settle}${defer}${motion}`;
+}
+
 // ---------- On-course test mode (secret unlock via About taps) ----------
 const TEST_CHECKLIST_ITEMS = [
   { id: "gps_fix", label: "GPS fix received" },
@@ -1540,7 +1904,7 @@ const TEST_CHECKLIST_ITEMS = [
   { id: "mark_shot_manual", label: "Mark a shot manually" },
   { id: "hole_out_manual", label: "Hole out manually" },
   { id: "auto_mark_shot", label: "Auto-mark a shot" },
-  { id: "auto_mark_countdown", label: "Auto-mark still countdown (dots)" },
+  { id: "auto_mark_countdown", label: "Auto-mark GPS settle countdown (dots)" },
   { id: "pocket_lock", label: "Engage pocket lock" },
   { id: "pocket_unlock", label: "Swipe unlock pocket lock" },
   { id: "tee_chime", label: "Next-tee proximity chime" },
@@ -2053,7 +2417,7 @@ function tryRecordPinMark(pos, opts) {
   const pin = courseHole.pin;
   const dist = haversine(pos.lat, pos.lon, pin.lat, pin.lon);
 
-  if (dist > PIN_ACCEPT_M) {
+  if (dist > sens("pinAcceptM")) {
     if (!silent) showToast(`Too far from known pin (${Math.round(dist)} m) — not recorded`);
     return;
   }
@@ -2200,10 +2564,23 @@ function renderHome() {
   const el = document.getElementById("recent-rounds");
   if (rounds.length === 0) {
     el.innerHTML = `<div class="empty">No rounds yet</div>`;
-    return;
+  } else {
+    const recent = [...rounds].reverse().slice(0, 4);
+    el.innerHTML = recent.map(r => roundListRowHtml(r)).join("");
   }
-  const recent = [...rounds].reverse().slice(0, 4);
-  el.innerHTML = recent.map(r => roundListRowHtml(r)).join("");
+  updateCourseSuggestBanner();
+  if (!watchId && navigator.geolocation && window.isSecureContext) {
+    try {
+      navigator.geolocation.getCurrentPosition(pos => {
+        currentPosition = {
+          lat: pos.coords.latitude,
+          lon: pos.coords.longitude,
+          accuracy: pos.coords.accuracy
+        };
+        updateCourseSuggestBanner();
+      }, () => {}, { enableHighAccuracy: true, maximumAge: 30000, timeout: 8000 });
+    } catch (_) {}
+  }
 }
 
 function renderAllRounds() {
@@ -2274,7 +2651,8 @@ function renderCourses() {
         <div style="display:flex;gap:8px;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end">
           <button class="btn-danger" style="padding:10px 12px" onclick="deleteCourse('${c.id}')">✕</button>
           <button class="btn-secondary" style="padding:10px 12px" onclick="openCourseMapFromManager('${c.id}')">Map</button>
-          <button class="btn-primary" style="padding:10px 16px" onclick="startRound('${c.id}')">Play</button>
+          <button class="btn-secondary" style="padding:10px 12px" onclick="promptStartRound('${c.id}','classic')">Classic</button>
+          <button class="btn-primary" style="padding:10px 16px" onclick="promptStartRound('${c.id}','handsOff')">Hands-off</button>
         </div>
       </div>
     </div>
@@ -2379,7 +2757,22 @@ function saveNewCourse() {
 }
 
 // ---------- Round ----------
-function startRound(courseId) {
+function promptStartRound(courseId, preferredMode) {
+  const mode = preferredMode || (settings.handsOff ? "handsOff" : "classic");
+  startRound(courseId, { mode });
+}
+
+function beginSuggestedHandsOff() {
+  if (!courseSuggestId) {
+    showToast("No nearby course");
+    return;
+  }
+  startRound(courseSuggestId, { mode: "handsOff", autoMark: true });
+}
+
+function startRound(courseId, opts) {
+  opts = opts || {};
+  const mode = opts.mode === "handsOff" ? "handsOff" : "classic";
   currentCourse = courses.find(c => c.id === courseId);
   if (!currentCourse) {
     showToast("Course not found");
@@ -2387,10 +2780,17 @@ function startRound(courseId) {
   }
   currentCourse.holes.forEach((_, i) => ensureCourseHole(i));
 
+  if (opts.autoMark || mode === "handsOff") {
+    settings.autoMark = true;
+    saveSettings();
+  }
+
   currentRound = {
     id: Date.now().toString(36),
     courseId,
     date: new Date().toISOString(),
+    mode,
+    flexible: mode === "handsOff",
     holes: currentCourse.holes.map((h, i) => ({
       holeNumber: i + 1,
       par: h.par,
@@ -2400,23 +2800,133 @@ function startRound(courseId) {
       walkTrack: []
     }))
   };
-  currentHoleIndex = 0;
+
+  // Hands-off: start at nearest known tee if GPS available
+  let startIdx = 0;
+  if (mode === "handsOff" && currentPosition) {
+    const nearest = findNearestTeeIndex(currentCourse, currentPosition);
+    if (nearest != null) startIdx = nearest.index;
+  }
+  currentHoleIndex = startIdx;
   anchorPosition = null;
-  currentPosition = null;
   isTeeingOff = true;
   selectedClub = null;
   clubForCurrentShot = null;
   pendingShotPosition = null;
   mockMoveStep = 0;
+  beginTeeChimedHole = null;
   resetTeeHandoffState();
   lastNearPinPos = null;
   lastPosBeforeNextTee = null;
+  gpsRecentBuf = [];
+  gpsGoodBuf = [];
+  lastGpsDeferReason = null;
 
-  document.getElementById("play-course-name").textContent = currentCourse.name;
+  document.getElementById("play-course-name").textContent =
+    currentCourse.name + (mode === "handsOff" ? " · Hands-off" : "");
   updatePlayUI();
   startGPS();
+  if (settings.autoMark) startMotionDiagListener();
   showScreen("play");
   recordTestEvent("start_round");
+  if (mode === "handsOff") {
+    showToast("Hands-off · approach a tee for the begin chime");
+  }
+}
+
+function findNearestTeeIndex(course, pos) {
+  if (!course || !pos) return null;
+  let best = null;
+  course.holes.forEach((_, i) => {
+    const tee = knownTeeForHole(course.id, i, null);
+    if (!tee) return;
+    const d = haversine(pos.lat, pos.lon, tee.lat, tee.lon);
+    if (!best || d < best.dist) best = { index: i, dist: d, tee };
+  });
+  return best;
+}
+
+function courseCentroid(course) {
+  const pts = [];
+  (course.holes || []).forEach((_, i) => {
+    const tee = knownTeeForHole(course.id, i, null);
+    if (tee) pts.push(tee);
+    const pin = course.holes[i] && course.holes[i].pin;
+    if (pin) pts.push(pin);
+  });
+  if (!pts.length) return null;
+  return gpsCentroid(pts);
+}
+
+function detectNearbyCourse(pos) {
+  if (!pos || !courses.length) return null;
+  let best = null;
+  courses.forEach(c => {
+    const cen = courseCentroid(c);
+    if (!cen) return;
+    const d = haversine(pos.lat, pos.lon, cen.lat, cen.lon);
+    if (d > COURSE_DETECT_M) return;
+    if (!best || d < best.dist) best = { course: c, dist: d };
+  });
+  return best;
+}
+
+function updateCourseSuggestBanner() {
+  const el = document.getElementById("course-suggest");
+  if (!el) return;
+  const home = document.getElementById("screen-home");
+  if (!home || !home.classList.contains("active")) {
+    el.classList.remove("show");
+    return;
+  }
+  const hit = detectNearbyCourse(currentPosition);
+  if (!hit) {
+    courseSuggestId = null;
+    el.classList.remove("show");
+    return;
+  }
+  courseSuggestId = hit.course.id;
+  const nameEl = document.getElementById("course-suggest-name");
+  const noteEl = document.getElementById("course-suggest-note");
+  if (nameEl) nameEl.textContent = hit.course.name;
+  if (noteEl) noteEl.textContent = `About ${Math.round(hit.dist)} m away · mapped tees/pins found`;
+  el.classList.add("show");
+}
+
+function maybeBeginTeeChime() {
+  if (!currentRound || !settings.autoMark || !currentPosition) return;
+  if (!isTeeingOff) return;
+  if (beginTeeChimedHole === currentHoleIndex) return;
+  const tee = knownTeeForHole(
+    currentRound.courseId,
+    currentHoleIndex,
+    currentRound.holes[currentHoleIndex]
+  );
+  if (!tee) return;
+  const d = haversine(currentPosition.lat, currentPosition.lon, tee.lat, tee.lon);
+  if (d > sens("teeNearM")) return;
+  if ((currentPosition.accuracy || 99) > sens("gpsMaxAccuracyM") + 4) return;
+  beginTeeChimedHole = currentHoleIndex;
+  playTeeNearbyChime();
+  showToast(`Near tee · Hole ${currentRound.holes[currentHoleIndex].holeNumber}`);
+  recordTestEvent("tee_chime");
+}
+
+function endFlexibleRoundEarly() {
+  if (!currentRound || !currentRound.flexible) return;
+  if (!confirm("End this hands-off round now? Unplayed holes stay empty.")) return;
+  // Trim trailing unplayed holes for a cleaner summary
+  let lastPlayed = -1;
+  currentRound.holes.forEach((h, i) => {
+    if (h.teePosition || (h.shots && h.shots.length)) lastPlayed = i;
+  });
+  if (lastPlayed >= 0 && lastPlayed < currentRound.holes.length - 1) {
+    currentRound.holes = currentRound.holes.slice(0, lastPlayed + 1);
+  }
+  unlockPocketLock();
+  stopAutoMarkWatch();
+  stopGPS();
+  showSummary();
 }
 
 function updatePlayUI() {
@@ -2443,12 +2953,19 @@ function updatePlayUI() {
   const btnOut = document.getElementById("btn-holeout");
 
   if (isTeeingOff) {
-    const firstTee = currentHoleIndex === 0 && !hole.teePosition;
-    btn.textContent = firstTee ? "Begin Round" : "Tee Off";
+    const isStart = currentRound.holes.every(h => !h.teePosition && !(h.shots && h.shots.length));
+    btn.textContent = isStart ? "Begin Round" : "Tee Off";
     btnOut.style.display = "none";
   } else {
     btn.textContent = "Mark Shot";
     btnOut.style.display = "block";
+  }
+
+  const endFlex = document.getElementById("btn-end-flexible");
+  if (endFlex) {
+    const showEnd = !!(currentRound && currentRound.flexible &&
+      currentRound.holes.some(h => h.teePosition || (h.shots && h.shots.length)));
+    endFlex.style.display = showEnd ? "block" : "none";
   }
 
   const lockBtn = document.getElementById("btn-pocket-lock");
@@ -2517,7 +3034,8 @@ function mainAction() {
     return;
   }
 
-  pendingShotPosition = { ...currentPosition };
+  const markPos = getBestMarkPosition() || currentPosition;
+  pendingShotPosition = { ...markPos };
   const dist = haversine(
     anchorPosition.lat, anchorPosition.lon,
     pendingShotPosition.lat, pendingShotPosition.lon
@@ -2537,20 +3055,21 @@ function confirmTeeOff() {
     showToast("Pick a club for your tee shot");
     return;
   }
-  if (!currentPosition) {
+  const markPos = getBestMarkPosition() || currentPosition;
+  if (!markPos) {
     showToast("Waiting for GPS fix");
     return;
   }
 
   const hole = currentRound.holes[currentHoleIndex];
   hole.teePosition = {
-    lat: currentPosition.lat,
-    lon: currentPosition.lon,
-    accuracy: currentPosition.accuracy,
+    lat: markPos.lat,
+    lon: markPos.lon,
+    accuracy: markPos.accuracy,
     club: selectedClub,
     at: new Date().toISOString()
   };
-  anchorPosition = { lat: currentPosition.lat, lon: currentPosition.lon };
+  anchorPosition = { lat: markPos.lat, lon: markPos.lon };
   clubForCurrentShot = selectedClub;
   hole.nextClub = selectedClub;
   isTeeingOff = false;
@@ -2573,9 +3092,17 @@ function openConfirmModal(dist) {
   updateToHoleDisplay("confirm-to-hole", pendingShotPosition);
   const note = document.querySelector("#modal-confirm .modal-note");
   if (note) {
-    note.textContent = settings.autoMark
+    let base = settings.autoMark
       ? "Next club optional in auto-mark mode — tap shots later to assign clubs."
       : "Pick the club for your upcoming shot while still at the ball.";
+    const acc = pendingShotPosition && pendingShotPosition.accuracy;
+    if (acc != null && acc > sens("gpsMaxAccuracyM")) {
+      base += ` GPS accuracy ±${Math.round(acc)} m — consider waiting for a better fix.`;
+    }
+    if (pendingShotPosition && pendingShotPosition.fromCluster) {
+      base += " Using settled GPS cluster.";
+    }
+    note.textContent = base;
   }
   document.getElementById("modal-confirm").classList.add("active");
 }
@@ -2636,6 +3163,7 @@ function advanceAfterHoleOut(opts) {
   resetTeeHandoffState();
   lastNearPinPos = null;
   lastPosBeforeNextTee = null;
+  beginTeeChimedHole = null;
   if (currentHoleIndex < currentRound.holes.length - 1) {
     currentHoleIndex++;
     isTeeingOff = true;
@@ -2655,7 +3183,8 @@ function advanceAfterHoleOut(opts) {
 function holeOut() {
   if (!confirm("Complete this hole and move on?\n\nYour last putt will be recorded at your current GPS position.")) return;
 
-  if (!currentPosition) {
+  const markPos = getBestMarkPosition() || currentPosition;
+  if (!markPos) {
     showToast("Waiting for GPS…");
     return;
   }
@@ -2668,7 +3197,7 @@ function holeOut() {
 
   const hole = currentRound.holes[currentHoleIndex];
   const from = { ...anchorPosition };
-  const to = { lat: currentPosition.lat, lon: currentPosition.lon };
+  const to = { lat: markPos.lat, lon: markPos.lon, accuracy: markPos.accuracy };
   const distance = haversine(from.lat, from.lon, to.lat, to.lon);
   const shotNum = hole.shots.length + 1;
 
@@ -2691,7 +3220,7 @@ function holeOut() {
   selectedClub = null;
   updatePlayUI();
 
-  tryRecordPinMark(currentPosition);
+  tryRecordPinMark(markPos);
 
   checkHoleScoreRecords();
 
@@ -2964,11 +3493,16 @@ function wantMockGps() {
 
 function applyMockPosition(pos) {
   currentPosition = pos;
+  ingestGpsFix(pos);
   recordWalkPoint(pos);
+  updateTeeHandoffTracking(pos);
+  maybeBeginTeeChime();
   const status = document.getElementById("gps-status");
   status.textContent = `Mock GPS (±${Math.round(pos.accuracy || 5)} m)`;
   status.className = "status warn";
   updateLiveDistance();
+  updateAutoMarkCountdownUI();
+  updateGpsDiagUI();
   maybeRedrawLiveMap();
   recordTestEvent("gps_fix");
 }
@@ -3042,11 +3576,18 @@ function startGPS() {
       if (bar) bar.classList.remove("show");
 
       const { latitude, longitude, accuracy } = pos.coords;
-      currentPosition = { lat: latitude, lon: longitude, accuracy };
+      const raw = { lat: latitude, lon: longitude, accuracy };
+      currentPosition = raw;
+      ingestGpsFix(raw);
       recordWalkPoint(currentPosition);
+      updateTeeHandoffTracking(currentPosition);
+      maybeBeginTeeChime();
       const status = document.getElementById("gps-status");
 
-      if (accuracy > 25) {
+      if (accuracy > sens("gpsMaxAccuracyM")) {
+        status.textContent = `GPS settling (±${Math.round(accuracy)} m)`;
+        status.className = "status warn";
+      } else if (accuracy > 25) {
         status.textContent = `GPS good-ish (±${Math.round(accuracy)} m)`;
         status.className = "status warn";
       } else {
@@ -3055,6 +3596,8 @@ function startGPS() {
       }
 
       updateLiveDistance();
+      updateAutoMarkCountdownUI();
+      updateGpsDiagUI();
       recordTestEvent("gps_fix");
     },
     err => {
@@ -3070,8 +3613,14 @@ function startGPS() {
       // Laptop / desktop: fall back to mock for UI testing
       enableMockGps("No GPS on this device — mock GPS for testing");
     },
-    { enableHighAccuracy: true, maximumAge: 2000, timeout: 15000 }
+    { enableHighAccuracy: true, maximumAge: 1000, timeout: 15000 }
   );
+
+  try {
+    navigator.geolocation.getCurrentPosition(() => {}, () => {}, {
+      enableHighAccuracy: true, maximumAge: 0, timeout: 10000
+    });
+  } catch (_) {}
 }
 
 function stopGPS() {
@@ -3581,7 +4130,7 @@ function isOneHitToGreen(roundHole, pin) {
   const to = roundHole.shots[0].to;
   if (!to) return false;
   if (!pin) return true;
-  return haversine(to.lat, to.lon, pin.lat, pin.lon) <= ON_GREEN_M;
+  return haversine(to.lat, to.lon, pin.lat, pin.lon) <= sens("onGreenM");
 }
 
 function collectMapPoints(roundHole, courseHole, courseId, holeIndex, opts) {
@@ -4725,9 +5274,11 @@ function bindMapGestures() {
     }
 
     canvas.setPointerCapture(e.pointerId);
-    mapPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    mapPointers.set(e.pointerId, { x: e.clientX, y: e.clientY, t: Date.now() });
+    mapSwipeStart = { x: e.clientX, y: e.clientY, t: Date.now() };
     canvas.classList.add("dragging");
     if (mapPointers.size === 2) {
+      mapSwipeStart = null;
       const pts = [...mapPointers.values()];
       mapLastPinchDist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
       mapLastPinchMid = {
@@ -4789,8 +5340,31 @@ function bindMapGestures() {
       canvas.classList.remove("dragging");
       if (mapSession && mapSession.persistRounds) saveData();
       if (currentRound) updatePlayUI();
+      mapSwipeStart = null;
       return;
     }
+
+    // One-finger horizontal swipe → step holes
+    if (mapSwipeStart && mapPointers.size === 1 && mapPointers.has(e.pointerId) && !mapTapMode) {
+      const start = mapSwipeStart;
+      const dx = e.clientX - start.x;
+      const dy = e.clientY - start.y;
+      const dt = Math.max(1, Date.now() - start.t);
+      const speed = Math.abs(dx) / dt;
+      const h = mapSession && ensureCourseHole(mapSession.holeIndex, mapSession.course);
+      const locked = !!(h && h.mapLocked);
+      // Unlocked pan: require quicker flick so it doesn't fight drag
+      const thresh = locked ? 56 : 80;
+      const minSpeed = locked ? 0.15 : 0.35;
+      if (Math.abs(dx) >= thresh && Math.abs(dx) > Math.abs(dy) * 1.4 && speed >= minSpeed) {
+        mapPointers.delete(e.pointerId);
+        mapSwipeStart = null;
+        canvas.classList.remove("dragging");
+        mapStepHole(dx < 0 ? 1 : -1);
+        return;
+      }
+    }
+
     mapPointers.delete(e.pointerId);
     if (mapPointers.size < 2) {
       mapLastPinchDist = null;
@@ -4799,6 +5373,7 @@ function bindMapGestures() {
     if (mapPointers.size === 0) {
       canvas.classList.remove("dragging");
       persistMapAlign();
+      mapSwipeStart = null;
     }
   }
   canvas.addEventListener("pointerup", endPointer);
@@ -4831,6 +5406,9 @@ function renderSettings() {
   const pocket = document.getElementById("setting-pocket-lock");
   const am = document.getElementById("setting-auto-mark");
   const snd = document.getElementById("setting-mark-sound");
+  const hands = document.getElementById("setting-hands-off");
+  const greenTap = document.getElementById("setting-green-tap");
+  const voice = document.getElementById("setting-voice");
   if (light) light.checked = settings.theme === "light";
   if (pocket) pocket.checked = !!settings.pocketLockAuto;
   if (am) am.checked = !!settings.autoMark;
@@ -4838,8 +5416,32 @@ function renderSettings() {
     snd.checked = !!settings.markSound;
     snd.disabled = !settings.autoMark;
   }
+  if (hands) hands.checked = !!settings.handsOff;
+  if (greenTap) greenTap.checked = !!settings.greenTapPutts;
+  if (voice) voice.checked = !!settings.voiceChimes;
   const row = document.getElementById("setting-sound-row");
   if (row) row.style.opacity = settings.autoMark ? "1" : "0.45";
+
+  document.querySelectorAll("#sens-presets button").forEach(btn => {
+    btn.classList.toggle("active", btn.dataset.preset === settings.sensPreset);
+  });
+
+  const sliders = document.getElementById("sens-sliders");
+  if (sliders) {
+    sliders.innerHTML = Object.keys(SENSITIVITY_RANGES).map(key => {
+      const r = SENSITIVITY_RANGES[key];
+      const val = sens(key);
+      return `<div class="sens-row">
+        <label><span>${r.label}</span><strong id="sens-val-${key}">${val}</strong></label>
+        <input type="range" id="sens-${key}" min="${r.min}" max="${r.max}" step="${r.step}" value="${val}"
+          oninput="onSensSlider('${key}', this.value)">
+      </div>`;
+    }).join("");
+  }
+  const sum = document.getElementById("sens-summary");
+  if (sum) {
+    sum.textContent = `Mark when within ${sens("autoMarkSettleM")} m for ${sens("autoMarkDwellS")} s, GPS ±${sens("gpsMaxAccuracyM")} m or better · tee ${sens("teeNearM")} m · pin ${sens("pinAcceptM")} m`;
+  }
 
   const cur = document.getElementById("settings-current-version");
   if (cur) cur.textContent = APP_VERSION;
@@ -5068,6 +5670,7 @@ function updatePocketLockInfo() {
       }).join("");
     }
   }
+  updateGpsDiagUI();
 }
 
 function unlockPocketLock() {
@@ -5180,15 +5783,8 @@ function recordWalkPoint(pos) {
 
 async function onAutoMarkToggle(on) {
   if (on) {
-    const ok = await ensureMotionPermission();
-    if (!ok) {
-      settings.autoMark = false;
-      saveSettings();
-      renderSettings();
-      showToast("Motion permission needed for auto-mark");
-      return;
-    }
     ensureAudioCtx();
+    startMotionDiagListener();
   } else {
     stopAutoMarkWatch();
   }
@@ -5197,7 +5793,8 @@ async function onAutoMarkToggle(on) {
   renderSettings();
   if (on && currentRound && !isTeeingOff) startAutoMarkWatch();
   updatePlayUI();
-  showToast(on ? "Auto-mark enabled" : "Auto-mark off");
+  updateGpsDiagUI();
+  showToast(on ? "Auto-mark enabled (GPS settle)" : "Auto-mark off");
 }
 
 function onMarkSoundToggle(on) {
@@ -5209,6 +5806,49 @@ function onMarkSoundToggle(on) {
   saveSettings();
   if (on) ensureAudioCtx();
   updatePlayUI();
+}
+
+function onHandsOffToggle(on) {
+  settings.handsOff = !!on;
+  saveSettings();
+  renderSettings();
+  showToast(on ? "Hands-off preferred for new rounds" : "Classic preferred for new rounds");
+}
+
+function onGreenTapToggle(on) {
+  settings.greenTapPutts = !!on;
+  saveSettings();
+  if (on) {
+    ensureMotionPermission().then(ok => {
+      if (ok) startMotionDiagListener();
+      else showToast("Motion permission helps green-tap putts");
+    });
+  } else {
+    stopMotionDiagListener();
+  }
+  renderSettings();
+}
+
+function onVoiceToggle(on) {
+  settings.voiceChimes = !!on;
+  saveSettings();
+  renderSettings();
+  showToast(on ? "Voice stub on — chimes still used" : "Voice stub off");
+}
+
+function onSensSlider(key, value) {
+  settings[key] = clampSens(key, value);
+  settings.sensPreset = "custom";
+  const label = document.getElementById("sens-val-" + key);
+  if (label) label.textContent = settings[key];
+  saveSettings();
+  const sum = document.getElementById("sens-summary");
+  if (sum) {
+    sum.textContent = `Mark when within ${sens("autoMarkSettleM")} m for ${sens("autoMarkDwellS")} s, GPS ±${sens("gpsMaxAccuracyM")} m or better · tee ${sens("teeNearM")} m · pin ${sens("pinAcceptM")} m`;
+  }
+  document.querySelectorAll("#sens-presets button").forEach(btn => {
+    btn.classList.remove("active");
+  });
 }
 
 async function ensureMotionPermission() {
@@ -5355,7 +5995,7 @@ function inTeeHandoffNearZone() {
     currentPosition.lat, currentPosition.lon,
     target.tee.lat, target.tee.lon
   );
-  return d <= NEXT_TEE_NEAR_M;
+  return d <= sens("teeNearM");
 }
 
 function updateTeeHandoffTracking(pos) {
@@ -5365,7 +6005,7 @@ function updateTeeHandoffTracking(pos) {
   const pin = getPin(currentHoleIndex);
   if (pin) {
     const dPin = haversine(pos.lat, pos.lon, pin.lat, pin.lon);
-    if (dPin <= ON_GREEN_M) {
+    if (dPin <= sens("onGreenM")) {
       lastNearPinPos = { lat: pos.lat, lon: pos.lon, accuracy: pos.accuracy };
     }
   }
@@ -5373,7 +6013,7 @@ function updateTeeHandoffTracking(pos) {
   const target = getTeeHandoffWatchTarget();
   if (target && target.mode === "nextTee") {
     const dTee = haversine(pos.lat, pos.lon, target.tee.lat, target.tee.lon);
-    if (dTee > NEXT_TEE_NEAR_M) {
+    if (dTee > sens("teeNearM")) {
       lastPosBeforeNextTee = { lat: pos.lat, lon: pos.lon, accuracy: pos.accuracy };
     }
   }
@@ -5402,12 +6042,12 @@ function checkTeeHandoffProximity() {
     target.tee.lat, target.tee.lon
   );
 
-  if (d > NEXT_TEE_LEAVE_M) {
+  if (d > sens("teeLeaveM")) {
     teeHandoffChimed = false;
     clearTeeHandoffDwell();
     return;
   }
-  if (d > NEXT_TEE_NEAR_M) {
+  if (d > sens("teeNearM")) {
     clearTeeHandoffDwell();
     return;
   }
@@ -5489,7 +6129,7 @@ function autoTeeOffSilent() {
   if (!hole) return false;
 
   const known = knownTeeForHole(currentRound.courseId, currentHoleIndex, hole);
-  const pos = currentPosition || known;
+  const pos = getBestMarkPosition() || currentPosition || known;
   if (!pos) return false;
 
   hole.teePosition = {
@@ -5506,6 +6146,7 @@ function autoTeeOffSilent() {
   isTeeingOff = false;
   noteMarkEvent();
   resetTeeHandoffState();
+  beginTeeChimedHole = currentHoleIndex;
   lastNearPinPos = null;
   lastPosBeforeNextTee = null;
   startAutoMarkWatch();
@@ -5572,11 +6213,11 @@ function noteMarkEvent() {
     }
   }
   lastMarkAt = now;
-  walkSeen = false;
-  stillSince = null;
-  stopAutoMarkStillTick();
+  settleSince = null;
+  stopAutoMarkSettleTick();
   autoMarkCooldownUntil = now + 25000;
   updateAutoMarkCountdownUI();
+  updateGpsDiagUI();
 }
 
 function minAutoMarkIntervalMs() {
@@ -5593,32 +6234,39 @@ function accelMag(ev) {
   return Math.sqrt(a.x * a.x + a.y * a.y + a.z * a.z);
 }
 
-function stopAutoMarkStillTick() {
-  if (autoMarkStillTick) {
-    clearInterval(autoMarkStillTick);
-    autoMarkStillTick = null;
+function stopAutoMarkSettleTick() {
+  if (autoMarkSettleTick) {
+    clearInterval(autoMarkSettleTick);
+    autoMarkSettleTick = null;
   }
 }
 
-function ensureAutoMarkStillTick() {
-  if (autoMarkStillTick) return;
-  autoMarkStillTick = setInterval(() => {
+function ensureAutoMarkSettleTick() {
+  if (autoMarkSettleTick) return;
+  autoMarkSettleTick = setInterval(() => {
     updateAutoMarkCountdownUI();
-    if (walkSeen && stillSince && Date.now() - stillSince >= AUTO_MARK_STILL_MS) {
-      tryAutoMark();
+    updateGpsDiagUI();
+    if (!autoMarkWatching) {
+      stopAutoMarkSettleTick();
+      return;
     }
-    if (!stillSince) stopAutoMarkStillTick();
-  }, 200);
+    tryAutoMark();
+  }, 250);
 }
 
-/** 5 dots collapse outside→in while still; color red→green. */
+/** 5 dots collapse outside→in while GPS settling; color red→green. */
 function getAutoMarkCountdownState() {
   if (!settings.autoMark || !autoMarkWatching || isTeeingOff || !currentRound) {
     return { show: false };
   }
-  if (!walkSeen || !stillSince) return { show: false };
-  const progress = Math.min(1, (Date.now() - stillSince) / AUTO_MARK_STILL_MS);
-  // 5 → 4 → 3 → 2 → 1 as progress advances
+  if (!anchorPosition) return { show: false };
+  const markPos = getBestMarkPosition();
+  if (!markPos) return { show: false };
+  const plaus = checkShotPlausibility(anchorPosition, markPos);
+  if (!plaus.ok && plaus.reason === "tooclose") return { show: false };
+  const cluster = getSettleCluster();
+  if (cluster.progress <= 0 && !cluster.settled) return { show: false };
+  const progress = Math.min(1, Math.max(0, cluster.progress));
   const remaining = Math.max(1, 5 - Math.floor(progress * 5));
   return { show: true, remaining, progress };
 }
@@ -5660,38 +6308,106 @@ function updateAutoMarkCountdownUI() {
   paintAmDots("pocket-lock-am-countdown", pocketLocked ? state : { show: false });
 }
 
+function updateGpsDiagUI() {
+  const text = gpsDiagText();
+  const playEl = document.getElementById("gps-diag-line");
+  if (playEl) {
+    const show = !!(settings.autoMark && currentRound);
+    playEl.classList.toggle("show", show);
+    if (show) playEl.textContent = text;
+  }
+  const lockEl = document.getElementById("pocket-lock-diag");
+  if (lockEl) {
+    const show = !!(pocketLocked && settings.autoMark);
+    lockEl.classList.toggle("show", show);
+    if (show) lockEl.textContent = text;
+  }
+}
+
+/** Motion for diagnostics + optional green tap putts only — never gates auto-mark. */
 function onDeviceMotion(ev) {
-  if (!autoMarkWatching) return;
   const mag = accelMag(ev);
   if (mag == null) return;
+  lastMotionMag = mag;
   const now = Date.now();
   motionBuf.push({ t: now, m: mag });
   motionBuf = motionBuf.filter(s => now - s.t < 2500);
-  if (motionBuf.length < 4) return;
+  if (pocketLocked || settings.autoMark) updateGpsDiagUI();
 
-  const vals = motionBuf.map(s => s.m);
-  const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
-  const variance = vals.reduce((a, b) => a + (b - mean) ** 2, 0) / vals.length;
-  const walking = mean > 1.2 && variance > 0.35;
-  const still = mean < 0.85 && variance < 0.25;
-
-  if (walking) {
-    walkSeen = true;
-    stillSince = null;
-    stopAutoMarkStillTick();
-    updateAutoMarkCountdownUI();
+  // Green tap / shake putt assist near pin
+  if (!settings.greenTapPutts || !settings.autoMark || !currentRound || isTeeingOff) return;
+  if (teeHandoffInProgress || inTeeHandoffNearZone()) return;
+  const pin = getPin(currentHoleIndex);
+  const pos = getBestMarkPosition() || currentPosition;
+  if (!pin || !pos) return;
+  const dPin = haversine(pos.lat, pos.lon, pin.lat, pin.lon);
+  if (dPin > sens("onGreenM")) {
+    greenTapTimes = [];
     return;
   }
-  if (walkSeen && still) {
-    if (!stillSince) stillSince = now;
-    ensureAutoMarkStillTick();
-    updateAutoMarkCountdownUI();
-    if (now - stillSince >= AUTO_MARK_STILL_MS) tryAutoMark();
-  } else if (!still) {
-    stillSince = null;
-    stopAutoMarkStillTick();
-    updateAutoMarkCountdownUI();
+  // Sharp bump: high instantaneous mag relative to recent mean
+  if (motionBuf.length < 3) return;
+  const vals = motionBuf.map(s => s.m);
+  const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
+  if (mag < mean + 2.2 && mag < 4.5) return;
+  greenTapTimes.push(now);
+  greenTapTimes = greenTapTimes.filter(t => now - t < GREEN_TAP_WINDOW_MS * GREEN_TAP_COUNT);
+  if (greenTapTimes.length >= GREEN_TAP_COUNT) {
+    greenTapTimes = [];
+    tryGreenTapPutt(pos);
   }
+}
+
+function tryGreenTapPutt(pos) {
+  if (!autoMarkWatching || !anchorPosition) return;
+  const now = Date.now();
+  if (now < autoMarkCooldownUntil) return;
+  if (now - lastMarkAt < 8000) return;
+  const from = { ...anchorPosition };
+  const to = { lat: pos.lat, lon: pos.lon, accuracy: pos.accuracy };
+  const dist = haversine(from.lat, from.lon, to.lat, to.lon);
+  if (dist < 0.5) return;
+  const hole = currentRound.holes[currentHoleIndex];
+  const shotNum = hole.shots.length + 1;
+  hole.shots.push({
+    number: shotNum,
+    distance: dist,
+    club: "Putter",
+    from,
+    to,
+    auto: true,
+    greenTap: true,
+    at: new Date().toISOString()
+  });
+  anchorPosition = { lat: to.lat, lon: to.lon };
+  clubForCurrentShot = "Putter";
+  hole.nextClub = "Putter";
+  lastAutoUndo = { holeIndex: currentHoleIndex, shotNumber: shotNum, prevAnchor: from };
+  noteMarkEvent();
+  playMarkBeeps(shotNum);
+  showAutoUndo();
+  updatePlayUI();
+  if (pocketLocked) updatePocketLockInfo();
+  showToast(`Green tap · putt ${shotNum}`);
+  recordTestEvent("auto_mark_shot");
+}
+
+function startMotionDiagListener() {
+  if (motionListener) return;
+  motionListener = onDeviceMotion;
+  window.addEventListener("devicemotion", motionListener, true);
+}
+
+function stopMotionDiagListener() {
+  // Keep listening during auto-mark / hands-off / green tap; stop only when idle
+  if (settings.autoMark || settings.greenTapPutts || (currentRound && settings.handsOff)) return;
+  if (motionListener) {
+    window.removeEventListener("devicemotion", motionListener, true);
+    motionListener = null;
+  }
+  lastMotionMag = null;
+  motionBuf = [];
+  greenTapTimes = [];
 }
 
 function startAutoMarkWatch() {
@@ -5700,33 +6416,26 @@ function startAutoMarkWatch() {
     return;
   }
   if (autoMarkWatching) {
+    ensureAutoMarkSettleTick();
     updatePlayUI();
     return;
   }
   autoMarkWatching = true;
-  walkSeen = false;
-  stillSince = null;
-  stopAutoMarkStillTick();
-  motionBuf = [];
+  settleSince = null;
   if (!lastMarkAt) lastMarkAt = Date.now();
-  motionListener = onDeviceMotion;
-  window.addEventListener("devicemotion", motionListener, true);
+  startMotionDiagListener();
+  ensureAutoMarkSettleTick();
   updatePlayUI();
 }
 
 function stopAutoMarkWatch() {
   autoMarkWatching = false;
-  if (motionListener) {
-    window.removeEventListener("devicemotion", motionListener, true);
-    motionListener = null;
-  }
-  walkSeen = false;
-  stillSince = null;
-  stopAutoMarkStillTick();
-  motionBuf = [];
+  settleSince = null;
+  stopAutoMarkSettleTick();
   hideAutoUndo();
   updateAutoMarkCountdownUI();
-  // Keep tee-handoff proximity alive while teeing off in auto-mark; only clear on full reset
+  stopMotionDiagListener();
+  updateGpsDiagUI();
 }
 
 function tryAutoMark() {
@@ -5737,21 +6446,34 @@ function tryAutoMark() {
   const now = Date.now();
   if (now < autoMarkCooldownUntil) return;
   if (now - lastMarkAt < minAutoMarkIntervalMs()) return;
-  if (!currentPosition || !anchorPosition) return;
+  if (!anchorPosition) return;
 
-  const dist = haversine(
-    anchorPosition.lat, anchorPosition.lon,
-    currentPosition.lat, currentPosition.lon
-  );
-  if (dist < 8) return;
+  const cluster = getSettleCluster();
+  if (!cluster.settled || !cluster.centroid) {
+    if (cluster.reason === "unusual") lastGpsDeferReason = "unusual";
+    updateAutoMarkCountdownUI();
+    updateGpsDiagUI();
+    return;
+  }
+
+  const to = {
+    lat: cluster.centroid.lat,
+    lon: cluster.centroid.lon,
+    accuracy: cluster.centroid.accuracy
+  };
+  const plaus = checkShotPlausibility(anchorPosition, to);
+  if (!plaus.ok) {
+    if (plaus.reason === "unusual") {
+      lastGpsDeferReason = "unusual";
+      maybeToastGpsDefer("GPS settling — unusual distance");
+    }
+    updateGpsDiagUI();
+    return;
+  }
 
   const hole = currentRound.holes[currentHoleIndex];
   const from = { ...anchorPosition };
-  const to = {
-    lat: currentPosition.lat,
-    lon: currentPosition.lon,
-    accuracy: currentPosition.accuracy
-  };
+  const dist = plaus.dist;
   const shotNum = hole.shots.length + 1;
 
   hole.shots.push({
@@ -5777,9 +6499,7 @@ function tryAutoMark() {
   noteMarkEvent();
   playMarkBeeps(shotNum);
   showAutoUndo();
-  stillSince = null;
-  walkSeen = false;
-  stopAutoMarkStillTick();
+  lastGpsDeferReason = null;
   updatePlayUI();
   if (pocketLocked) updatePocketLockInfo();
   showToast(`Auto-marked shot ${shotNum}`);
@@ -6045,7 +6765,7 @@ bindStarBadgeGestures();
 renderHome();
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./service-worker.js").catch(() => {});
+    navigator.serviceWorker.register("./service-worker.js").then(reg => reg.update()).catch(() => {});
   });
 }
 window.addEventListener("beforeinstallprompt", e => {
