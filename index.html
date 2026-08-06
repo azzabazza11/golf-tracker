@@ -1214,7 +1214,7 @@
           <li><strong>D</strong> — short shuffle + soft taps (×2)</li>
           <li><strong>A+B</strong> — repeat at vigorous walk (×3)</li>
         </ul>
-        <p style="margin:8px 0 0">Same pocket every time. Optional: tap recording screen to drop a marker.</p>
+        <p style="margin:8px 0 0">Same pocket every time. Keep the screen awake (app will try to hold it). Optional: tap recording screen to drop a marker.</p>
       </details>
       <div class="setting-row" style="margin-top:12px">
         <div class="setting-text">
@@ -1618,7 +1618,7 @@
   </div>
 
 <script>
-const APP_VERSION = "1.5.3";
+const APP_VERSION = "1.5.4";
 const PAGES_URL = "https://azzabazza11.github.io/golf-tracker/";
 const FEEDBACK_EMAIL = "aaron.callinan@gmail.com";
 const SUPPORT_URL = "https://ko-fi.com/aaroncallinan";
@@ -1649,7 +1649,7 @@ const BACKUP_FORMAT = "gst-backup-v1";
 
 const SENSITIVITY_DEFAULTS = {
   autoMarkSettleM: 3,
-  autoMarkDwellS: 9,
+  autoMarkDwellS: 5,
   autoMarkMinShotM: 8,
   gpsMaxAccuracyM: 8,
   teeNearM: 3,
@@ -1661,7 +1661,7 @@ const SENSITIVITY_DEFAULTS = {
 const SENSITIVITY_PRESETS = {
   strict: {
     autoMarkSettleM: 2,
-    autoMarkDwellS: 12,
+    autoMarkDwellS: 7,
     autoMarkMinShotM: 10,
     gpsMaxAccuracyM: 5,
     teeNearM: 3,
@@ -1672,7 +1672,7 @@ const SENSITIVITY_PRESETS = {
   balanced: { ...SENSITIVITY_DEFAULTS },
   forgiving: {
     autoMarkSettleM: 5,
-    autoMarkDwellS: 7,
+    autoMarkDwellS: 5,
     autoMarkMinShotM: 6,
     gpsMaxAccuracyM: 15,
     teeNearM: 5,
@@ -1853,6 +1853,7 @@ let calTick = null;
 let calMarkerIdx = 0;
 let lastCalTickAt = 0;
 let lastCalExportPayload = null;
+let calWakeLock = null;
 
 // Next-tee auto-mark handoff (pocket lock continuous play)
 let lastNearPinPos = null;
@@ -2306,6 +2307,29 @@ function openCalibrationHelp() {
   document.getElementById("modal-cal-help")?.classList.add("active");
 }
 
+async function requestCalWakeLock() {
+  try {
+    if (!("wakeLock" in navigator)) return;
+    calWakeLock = await navigator.wakeLock.request("screen");
+    calWakeLock.addEventListener("release", () => { calWakeLock = null; });
+  } catch (e) {
+    console.warn("Wake lock unavailable", e);
+  }
+}
+
+async function releaseCalWakeLock() {
+  try {
+    if (calWakeLock) {
+      await calWakeLock.release();
+      calWakeLock = null;
+    }
+  } catch (_) {}
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && calRecording) requestCalWakeLock();
+});
+
 async function startCalibrationSession() {
   if (calRecording) {
     showToast("Already recording");
@@ -2332,6 +2356,7 @@ async function startCalibrationSession() {
   if (!watchId && !mockGpsActive) startGPS();
   else if (!watchId && mockGpsActive) { /* mock already active */ }
   startMotionDiagListener();
+  await requestCalWakeLock();
   if (calTick) clearInterval(calTick);
   calTick = setInterval(recordCalibrationTick, CALIBRATION_TICK_MS);
 
@@ -2341,7 +2366,7 @@ async function startCalibrationSession() {
     overlay.setAttribute("aria-hidden", "false");
   }
   updateCalibrationOverlayUI();
-  showToast("Calibration recording — pocket the phone and walk");
+  showToast("Recording — keep screen on; pocket and walk");
   recordTestEvent("calibration_start");
 }
 
@@ -2352,6 +2377,7 @@ function stopCalibrationSession() {
     clearInterval(calTick);
     calTick = null;
   }
+  releaseCalWakeLock();
   const overlay = document.getElementById("cal-overlay");
   if (overlay) {
     overlay.classList.remove("show");
