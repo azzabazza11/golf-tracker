@@ -802,6 +802,70 @@
     #test-mode-card { display: none; }
     #test-mode-card.show { display: block; }
 
+    .cal-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 600;
+      background:
+        radial-gradient(ellipse at 50% 15%, rgba(46, 204, 113, 0.12), transparent 55%),
+        var(--bg);
+      touch-action: manipulation;
+      user-select: none;
+    }
+    .cal-overlay.show { display: flex; align-items: center; justify-content: center; }
+    .cal-inner {
+      width: min(360px, 92vw);
+      text-align: center;
+      padding: 20px 16px;
+    }
+    .cal-title { font-size: 18px; font-weight: 600; margin-bottom: 4px; }
+    .cal-timer { font-size: 42px; font-weight: 700; color: var(--accent); margin: 8px 0; font-variant-numeric: tabular-nums; }
+    .cal-meta { font-size: 13px; color: var(--muted); margin-bottom: 14px; }
+    .cal-bar-row {
+      display: grid;
+      grid-template-columns: 52px 1fr 38px;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 8px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .cal-bar {
+      height: 10px;
+      border-radius: 5px;
+      background: var(--pill);
+      border: 1px solid var(--border);
+      overflow: hidden;
+    }
+    .cal-bar > div {
+      height: 100%;
+      width: 0%;
+      border-radius: 5px;
+      background: var(--accent);
+      transition: width 0.15s ease;
+    }
+    .cal-bar.combined > div { background: linear-gradient(90deg, #e74c3c, #f39c12, var(--accent)); }
+    .cal-threshold {
+      font-size: 11px;
+      color: var(--muted);
+      margin: 4px 0 12px;
+    }
+    .cal-marker-hint {
+      font-size: 12px;
+      color: var(--muted);
+      margin: 10px 0 14px;
+      min-height: 2.4em;
+    }
+    .cal-protocol {
+      font-size: 12px;
+      color: var(--muted);
+      text-align: left;
+      line-height: 1.45;
+      margin-top: 10px;
+    }
+    .cal-protocol summary { cursor: pointer; font-weight: 600; color: var(--text); margin-bottom: 6px; }
+
     .pocket-swipe {
       position: relative;
       height: 64px;
@@ -1122,6 +1186,37 @@
       <p class="modal-note" style="margin-top:12px">App version v<span id="settings-current-version"></span></p>
     </div>
 
+    <div class="card" id="calibration-card">
+      <h3 style="margin-bottom:6px">Calibration mode</h3>
+      <p class="modal-note" style="margin-bottom:10px">
+        Record GPS + motion for tuning auto-mark. Hands-free: start, walk your protocol, stop &amp; export JSON to share for analysis.
+      </p>
+      <details class="cal-protocol">
+        <summary>Container A/B/C/D protocol (~10 min)</summary>
+        <p style="margin:8px 0 0">Loop 2m→6m→2m→6m at each corner:</p>
+        <ul style="margin:6px 0 0 16px;padding:0">
+          <li><strong>A</strong> — stop 8–10s, no swing (×3 slow)</li>
+          <li><strong>B</strong> — stop, 1 pretend stroke, stand 5s (×3 slow)</li>
+          <li><strong>C</strong> — 2–3 practice swings, no hit (×2)</li>
+          <li><strong>D</strong> — short shuffle + soft taps (×2)</li>
+          <li><strong>A+B</strong> — repeat at vigorous walk (×3)</li>
+        </ul>
+        <p style="margin:8px 0 0">Same pocket every time. Optional: tap recording screen to drop a marker.</p>
+      </details>
+      <div class="setting-row" style="margin-top:12px">
+        <div class="setting-text">
+          <strong>Show score bars in play</strong>
+          <span>GPS / motion / combined % on the play screen (debug).</span>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="setting-show-scores" onchange="onShowScoreHudToggle(this.checked)">
+          <span class="slider"></span>
+        </label>
+      </div>
+      <button type="button" class="btn-primary" style="width:100%;margin-top:12px" id="btn-start-calibration" onclick="startCalibrationSession()">Start calibration session</button>
+      <button type="button" class="btn-secondary" style="width:100%;margin-top:10px" onclick="openCalibrationHelp()">Export format &amp; tips</button>
+    </div>
+
     <div class="card" id="test-mode-card">
       <h3 style="margin-bottom:8px">Test mode</h3>
       <p class="modal-note" style="margin-bottom:12px">
@@ -1139,6 +1234,45 @@
       </div>
       <button type="button" class="btn-primary" style="width:100%;margin-top:8px" onclick="openTestChecklist()">Open checklist</button>
       <button type="button" class="btn-secondary" style="width:100%;margin-top:10px" onclick="resetTestChecklist()">Reset checklist</button>
+    </div>
+  </div>
+
+  <!-- MODAL: Calibration export -->
+  <div id="modal-cal-export" class="modal">
+    <div class="modal-content">
+      <h3 style="margin-bottom:8px">Calibration export</h3>
+      <p class="modal-note" id="cal-export-summary">Session ready.</p>
+      <div class="label">Notes (pocket, phone, container vs grass)</div>
+      <textarea id="cal-export-notes" rows="3" placeholder="e.g. left pocket, Pixel 8, shipping container, slow+vigorous" style="width:100%;resize:vertical;margin-bottom:12px"></textarea>
+      <button type="button" class="btn-primary" style="width:100%" onclick="downloadCalibrationJson()">Download JSON file</button>
+      <button type="button" class="btn-secondary" style="width:100%;margin-top:10px" onclick="copyCalibrationJson()">Copy JSON to clipboard</button>
+      <button type="button" class="btn-secondary" style="width:100%;margin-top:10px" onclick="closeModal()">Done</button>
+    </div>
+  </div>
+
+  <!-- MODAL: Calibration help -->
+  <div id="modal-cal-help" class="modal">
+    <div class="modal-content">
+      <h3 style="margin-bottom:8px">Calibration data</h3>
+      <p class="modal-note">Export file format: <strong>gst-calibration-v1</strong>. Upload the .json in chat to tune GPS + motion thresholds.</p>
+      <p class="modal-note" style="margin-top:10px">Each sample includes GPS settle progress, motion magnitude/variance, and computed scores (0–100%). Mark threshold for simulation: <strong>75%</strong>.</p>
+      <p class="modal-note" style="margin-top:10px">Recording does not change auto-mark during capture — data only.</p>
+      <button type="button" class="btn-secondary" style="width:100%;margin-top:16px" onclick="closeModal()">Close</button>
+    </div>
+  </div>
+
+  <!-- Calibration recording overlay -->
+  <div id="cal-overlay" class="cal-overlay" aria-hidden="true" onclick="onCalibrationOverlayTap(event)">
+    <div class="cal-inner" onclick="event.stopPropagation()">
+      <div class="cal-title">Calibration recording</div>
+      <div class="cal-timer" id="cal-timer">0:00</div>
+      <div class="cal-meta" id="cal-sample-count">0 samples</div>
+      <div class="cal-bar-row"><span>GPS</span><div class="cal-bar"><div id="cal-bar-gps"></div></div><span id="cal-val-gps">0%</span></div>
+      <div class="cal-bar-row"><span>Motion</span><div class="cal-bar"><div id="cal-bar-motion"></div></div><span id="cal-val-motion">0%</span></div>
+      <div class="cal-bar-row"><span>Combined</span><div class="cal-bar combined"><div id="cal-bar-combined"></div></div><span id="cal-val-combined">0%</span></div>
+      <div class="cal-threshold" id="cal-threshold-line">Mark sim threshold: 75%</div>
+      <div class="cal-marker-hint" id="cal-marker-hint">Optional: tap outside buttons to drop marker A→B→C→D→duck</div>
+      <button type="button" class="btn-danger" style="width:100%;padding:14px;font-size:16px" onclick="stopCalibrationSession()">Stop &amp; export</button>
     </div>
   </div>
 
@@ -1471,7 +1605,7 @@
   </div>
 
 <script>
-const APP_VERSION = "1.5.0";
+const APP_VERSION = "1.5.1";
 const PAGES_URL = "https://azzabazza11.github.io/golf-tracker/";
 const FEEDBACK_EMAIL = "aaron.callinan@gmail.com";
 const SUPPORT_URL = "https://ko-fi.com/aaroncallinan";
@@ -1491,6 +1625,13 @@ const GPS_MAX_FOOT_SPEED_MS = 15;
 const COURSE_DETECT_M = 120;
 const GREEN_TAP_WINDOW_MS = 900;
 const GREEN_TAP_COUNT = 3;
+const CALIBRATION_FORMAT = "gst-calibration-v1";
+const CALIBRATION_TICK_MS = 200;
+const CAL_MARK_THRESHOLD = 75;
+const CAL_GPS_WEIGHT_FAIRWAY = 0.6;
+const CAL_MOTION_WEIGHT_FAIRWAY = 0.4;
+const CAL_MAX_SAMPLES = 9000;
+const CAL_MARKER_TYPES = ["A_stop", "B_stroke", "C_practice", "D_putt", "pause_duck"];
 
 const SENSITIVITY_DEFAULTS = {
   autoMarkSettleM: 3,
@@ -1577,6 +1718,7 @@ function loadSettings() {
       handsOff: !!s.handsOff,
       greenTapPutts: s.greenTapPutts !== false,
       voiceChimes: !!s.voiceChimes,
+      showScoreHud: !!s.showScoreHud,
       sensPreset: s.sensPreset === "strict" || s.sensPreset === "forgiving" ? s.sensPreset : "balanced"
     };
     Object.keys(SENSITIVITY_DEFAULTS).forEach(k => {
@@ -1595,6 +1737,7 @@ function loadSettings() {
       handsOff: false,
       greenTapPutts: true,
       voiceChimes: false,
+      showScoreHud: false,
       sensPreset: "balanced",
       ...SENSITIVITY_DEFAULTS
     };
@@ -1686,6 +1829,14 @@ let lastGpsDeferToastAt = 0;
 let greenTapTimes = [];
 let courseSuggestId = null;
 let beginTeeChimedHole = null;
+
+// Calibration session (GPS + motion data capture)
+let calRecording = false;
+let calSession = null;
+let calTick = null;
+let calMarkerIdx = 0;
+let lastCalTickAt = 0;
+let lastCalExportPayload = null;
 
 // Next-tee auto-mark handoff (pocket lock continuous play)
 let lastNearPinPos = null;
@@ -1890,10 +2041,328 @@ function gpsDiagText() {
     else if (cluster.reason === "dwell") settle = `settling ${Math.ceil((1 - cluster.progress) * sens("autoMarkDwellS"))}s`;
     else if (cluster.reason === "spread") settle = "moving";
     else settle = "acquiring";
+  } else if (calRecording || settings.showScoreHud) {
+    if (cluster.settled) settle = "settled";
+    else if (cluster.reason === "dwell") settle = `settling ${Math.ceil((1 - cluster.progress) * sens("autoMarkDwellS"))}s`;
+    else if (cluster.reason === "spread") settle = "moving";
+    else settle = "acquiring";
   }
   const defer = lastGpsDeferReason ? ` · ${lastGpsDeferReason}` : "";
-  const motion = lastMotionMag != null ? ` · motion ref ${lastMotionMag.toFixed(1)}` : "";
-  return `${acc} · ${fromShot} · ${settle}${defer}${motion}`;
+  const scores = computeMarkScores();
+  const scoreBit = (calRecording || settings.showScoreHud)
+    ? ` · GPS ${scores.gps}% · mot ${scores.motion}% · Σ ${scores.combined}%`
+    : "";
+  const motion = lastMotionMag != null && !scoreBit ? ` · motion ref ${lastMotionMag.toFixed(1)}` : "";
+  return `${acc} · ${fromShot} · ${settle}${defer}${scoreBit}${motion}`;
+}
+
+// ---------- Hybrid score channels (0–100, for calibration + future auto-mark) ----------
+function getMotionStats() {
+  if (motionBuf.length < 2) {
+    const mag = lastMotionMag != null ? lastMotionMag : 0;
+    return { mean: mag, variance: 0, mag, spike: false };
+  }
+  const vals = motionBuf.map(s => s.m);
+  const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
+  const variance = vals.reduce((a, b) => a + (b - mean) ** 2, 0) / vals.length;
+  const mag = lastMotionMag != null ? lastMotionMag : mean;
+  const spike = mag > mean + 2.2 || mag > 4.5;
+  return { mean, variance, mag, spike };
+}
+
+function computeGpsScore() {
+  const cluster = getSettleCluster();
+  let score = Math.min(100, Math.max(0, cluster.progress * 100));
+  if (cluster.settled) score = 100;
+  const acc = currentPosition && currentPosition.accuracy;
+  if (acc != null) {
+    const maxAcc = sens("gpsMaxAccuracyM");
+    const accFactor = acc <= maxAcc ? 1 : Math.max(0.15, 1 - (acc - maxAcc) / (maxAcc * 2));
+    score *= accFactor;
+  }
+  return Math.round(Math.min(100, Math.max(0, score)));
+}
+
+function computeMotionScore() {
+  const { mean, variance, mag, spike } = getMotionStats();
+  if (spike) return Math.min(95, Math.round(72 + Math.min(23, (mag - mean) * 6)));
+  if (variance > 0.35 && mean > 1.1) return Math.round(28 + Math.min(18, variance * 35));
+  if (variance > 0.15 || mean > 0.9) return Math.round(18 + Math.min(15, variance * 25 + mean * 4));
+  return Math.round(8 + Math.min(12, mean * 2));
+}
+
+function computeCombinedScore(gpsScore, motionScore, zone) {
+  const z = zone || "fairway";
+  const wG = z === "green" ? 0.3 : CAL_GPS_WEIGHT_FAIRWAY;
+  const wM = z === "green" ? 0.7 : CAL_MOTION_WEIGHT_FAIRWAY;
+  return Math.round(wG * gpsScore + wM * motionScore);
+}
+
+function computeMarkScores(zone) {
+  const gps = computeGpsScore();
+  const motion = computeMotionScore();
+  const combined = computeCombinedScore(gps, motion, zone);
+  const cluster = getSettleCluster();
+  const markPos = getBestMarkPosition();
+  let wouldMark = combined >= CAL_MARK_THRESHOLD && cluster.settled;
+  if (anchorPosition && markPos) {
+    const plaus = checkShotPlausibility(anchorPosition, markPos);
+    wouldMark = wouldMark && plaus.ok;
+  }
+  return {
+    gps,
+    motion,
+    combined,
+    threshold: CAL_MARK_THRESHOLD,
+    wouldMark,
+    weights: { gps: zone === "green" ? 0.3 : CAL_GPS_WEIGHT_FAIRWAY, motion: zone === "green" ? 0.7 : CAL_MOTION_WEIGHT_FAIRWAY }
+  };
+}
+
+function buildCalibrationSample(kind) {
+  const cluster = getSettleCluster();
+  const stats = getMotionStats();
+  const scores = computeMarkScores();
+  const t = calSession ? Date.now() - calSession.startedAtMs : 0;
+  const sample = {
+    t,
+    kind: kind || "tick",
+    gps: currentPosition ? {
+      lat: currentPosition.lat,
+      lon: currentPosition.lon,
+      accuracy: currentPosition.accuracy != null ? currentPosition.accuracy : null
+    } : null,
+    settle: {
+      progress: cluster.progress,
+      settled: cluster.settled,
+      reason: cluster.reason || null,
+      count: cluster.count || 0
+    },
+    motion: {
+      mag: stats.mag != null ? Math.round(stats.mag * 100) / 100 : null,
+      variance: Math.round(stats.variance * 1000) / 1000,
+      mean: Math.round(stats.mean * 100) / 100,
+      spike: stats.spike
+    },
+    scores: {
+      gps: scores.gps,
+      motion: scores.motion,
+      combined: scores.combined,
+      threshold: scores.threshold,
+      wouldMark: scores.wouldMark
+    },
+    deferReason: lastGpsDeferReason || null
+  };
+  return sample;
+}
+
+function updateCalibrationOverlayUI(scores) {
+  const s = scores || computeMarkScores();
+  const elapsed = calSession ? Date.now() - calSession.startedAtMs : 0;
+  const sec = Math.floor(elapsed / 1000);
+  const timer = document.getElementById("cal-timer");
+  if (timer) timer.textContent = `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`;
+  const cnt = document.getElementById("cal-sample-count");
+  if (cnt && calSession) cnt.textContent = `${calSession.samples.length} samples · ${calSession.markers.length} markers`;
+  function setBar(id, valId, pct) {
+    const bar = document.getElementById(id);
+    const lab = document.getElementById(valId);
+    if (bar) bar.style.width = pct + "%";
+    if (lab) lab.textContent = pct + "%";
+  }
+  setBar("cal-bar-gps", "cal-val-gps", s.gps);
+  setBar("cal-bar-motion", "cal-val-motion", s.motion);
+  setBar("cal-bar-combined", "cal-val-combined", s.combined);
+  const th = document.getElementById("cal-threshold-line");
+  if (th) th.textContent = `Mark sim: ${s.combined}% / ${s.threshold}%` + (s.wouldMark ? " · would mark" : "");
+}
+
+function recordCalibrationTick() {
+  if (!calRecording || !calSession) return;
+  if (calSession.samples.length >= CAL_MAX_SAMPLES) {
+    showToast("Sample limit reached — stop and export");
+    stopCalibrationSession();
+    return;
+  }
+  const now = Date.now();
+  if (now - lastCalTickAt < CALIBRATION_TICK_MS - 20) return;
+  lastCalTickAt = now;
+  calSession.samples.push(buildCalibrationSample("tick"));
+  updateCalibrationOverlayUI();
+  updateGpsDiagUI();
+}
+
+function pushCalibrationGpsSample() {
+  if (!calRecording || !calSession) return;
+  const last = calSession.samples[calSession.samples.length - 1];
+  if (last && last.kind === "gps" && Date.now() - calSession.startedAtMs - last.t < 400) return;
+  calSession.samples.push(buildCalibrationSample("gps"));
+}
+
+function addCalibrationMarker(type) {
+  if (!calSession) return;
+  const entry = { t: Date.now() - calSession.startedAtMs, type };
+  calSession.markers.push(entry);
+  const hint = document.getElementById("cal-marker-hint");
+  if (hint) hint.textContent = `Marker: ${type} @ ${Math.round(entry.t / 1000)}s — tap to cycle (${calSession.markers.length} total)`;
+  updateCalibrationOverlayUI();
+}
+
+function onCalibrationOverlayTap(ev) {
+  if (!calRecording) return;
+  if (ev.target.closest("button")) return;
+  const type = CAL_MARKER_TYPES[calMarkerIdx % CAL_MARKER_TYPES.length];
+  calMarkerIdx++;
+  addCalibrationMarker(type);
+}
+
+function buildCalibrationExportObject(notes) {
+  if (!calSession) return null;
+  const sensitivity = {};
+  Object.keys(SENSITIVITY_DEFAULTS).forEach(k => { sensitivity[k] = sens(k); });
+  return {
+    format: CALIBRATION_FORMAT,
+    appVersion: APP_VERSION,
+    device: {
+      userAgent: navigator.userAgent || "",
+      platform: navigator.platform || "",
+      maxTouchPoints: navigator.maxTouchPoints || 0
+    },
+    protocol: calSession.protocol || "container-abcd",
+    notes: notes || "",
+    sensitivity,
+    scoresMeta: {
+      markThreshold: CAL_MARK_THRESHOLD,
+      gpsWeightFairway: CAL_GPS_WEIGHT_FAIRWAY,
+      motionWeightFairway: CAL_MOTION_WEIGHT_FAIRWAY
+    },
+    startedAt: calSession.startedAtIso,
+    endedAt: new Date().toISOString(),
+    durationMs: Date.now() - calSession.startedAtMs,
+    markers: calSession.markers,
+    samples: calSession.samples
+  };
+}
+
+function calibrationFilename() {
+  const d = new Date();
+  const pad = n => String(n).padStart(2, "0");
+  return `gst-calibration-${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}.json`;
+}
+
+function downloadCalibrationJson() {
+  const notes = document.getElementById("cal-export-notes")?.value?.trim() || "";
+  const payload = lastCalExportPayload || buildCalibrationExportObject(notes);
+  if (!payload) {
+    showToast("No calibration session");
+    return;
+  }
+  if (notes) payload.notes = notes;
+  const json = JSON.stringify(payload, null, 2);
+  const blob = new Blob([json], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = calibrationFilename();
+  a.click();
+  URL.revokeObjectURL(a.href);
+  showToast("Calibration file downloaded");
+  recordTestEvent("calibration_export");
+}
+
+async function copyCalibrationJson() {
+  const notes = document.getElementById("cal-export-notes")?.value?.trim() || "";
+  const payload = lastCalExportPayload || buildCalibrationExportObject(notes);
+  if (!payload) {
+    showToast("No calibration session");
+    return;
+  }
+  if (notes) payload.notes = notes;
+  const json = JSON.stringify(payload);
+  try {
+    await navigator.clipboard.writeText(json);
+    showToast("JSON copied — paste into chat");
+  } catch (e) {
+    showToast("Copy failed — use Download instead");
+  }
+}
+
+function openCalibrationHelp() {
+  document.getElementById("modal-cal-help")?.classList.add("active");
+}
+
+async function startCalibrationSession() {
+  if (calRecording) {
+    showToast("Already recording");
+    return;
+  }
+  const motionOk = await ensureMotionPermission();
+  if (!motionOk) {
+    showToast("Motion permission helps calibration — enable if prompted");
+  }
+  calMarkerIdx = 0;
+  calSession = {
+    startedAtMs: Date.now(),
+    startedAtIso: new Date().toISOString(),
+    protocol: "container-abcd",
+    samples: [],
+    markers: []
+  };
+  calRecording = true;
+  lastCalTickAt = 0;
+  gpsRecentBuf = [];
+  gpsGoodBuf = [];
+  lastGpsDeferReason = null;
+
+  if (!watchId && !mockGpsActive) startGPS();
+  else if (!watchId && mockGpsActive) { /* mock already active */ }
+  startMotionDiagListener();
+  if (calTick) clearInterval(calTick);
+  calTick = setInterval(recordCalibrationTick, CALIBRATION_TICK_MS);
+
+  const overlay = document.getElementById("cal-overlay");
+  if (overlay) {
+    overlay.classList.add("show");
+    overlay.setAttribute("aria-hidden", "false");
+  }
+  updateCalibrationOverlayUI();
+  showToast("Calibration recording — pocket the phone and walk");
+  recordTestEvent("calibration_start");
+}
+
+function stopCalibrationSession() {
+  if (!calRecording) return;
+  calRecording = false;
+  if (calTick) {
+    clearInterval(calTick);
+    calTick = null;
+  }
+  const overlay = document.getElementById("cal-overlay");
+  if (overlay) {
+    overlay.classList.remove("show");
+    overlay.setAttribute("aria-hidden", "true");
+  }
+
+  lastCalExportPayload = buildCalibrationExportObject("");
+  const summary = document.getElementById("cal-export-summary");
+  if (summary && calSession) {
+    const sec = Math.round((Date.now() - calSession.startedAtMs) / 1000);
+    summary.textContent = `${calSession.samples.length} samples, ${calSession.markers.length} markers, ${sec}s — download or copy JSON to share.`;
+  }
+  const notesEl = document.getElementById("cal-export-notes");
+  if (notesEl) notesEl.value = "";
+
+  if (!currentRound) stopGPS();
+  stopMotionDiagListener();
+
+  document.getElementById("modal-cal-export")?.classList.add("active");
+  showToast("Recording stopped");
+  recordTestEvent("calibration_stop");
+}
+
+function onShowScoreHudToggle(on) {
+  settings.showScoreHud = !!on;
+  saveSettings();
+  updateGpsDiagUI();
 }
 
 // ---------- On-course test mode (secret unlock via About taps) ----------
@@ -1923,7 +2392,10 @@ const TEST_CHECKLIST_ITEMS = [
   { id: "club_edit", label: "Assign / edit a club" },
   { id: "light_mode", label: "Toggle light mode" },
   { id: "walk_track", label: "Toggle walk track on map" },
-  { id: "save_exit", label: "Save and exit a round" }
+  { id: "save_exit", label: "Save and exit a round" },
+  { id: "calibration_start", label: "Start calibration session" },
+  { id: "calibration_stop", label: "Stop calibration & export" },
+  { id: "calibration_export", label: "Export calibration JSON" }
 ];
 
 let aboutSecretTaps = [];
@@ -3503,6 +3975,8 @@ function applyMockPosition(pos) {
   updateLiveDistance();
   updateAutoMarkCountdownUI();
   updateGpsDiagUI();
+  pushCalibrationGpsSample();
+  if (calRecording) updateCalibrationOverlayUI();
   maybeRedrawLiveMap();
   recordTestEvent("gps_fix");
 }
@@ -3598,6 +4072,8 @@ function startGPS() {
       updateLiveDistance();
       updateAutoMarkCountdownUI();
       updateGpsDiagUI();
+      pushCalibrationGpsSample();
+      if (calRecording) updateCalibrationOverlayUI();
       recordTestEvent("gps_fix");
     },
     err => {
@@ -5427,6 +5903,8 @@ function renderSettings() {
   if (hands) hands.checked = !!settings.handsOff;
   if (greenTap) greenTap.checked = !!settings.greenTapPutts;
   if (voice) voice.checked = !!settings.voiceChimes;
+  const showScores = document.getElementById("setting-show-scores");
+  if (showScores) showScores.checked = !!settings.showScoreHud;
   const row = document.getElementById("setting-sound-row");
   if (row) row.style.opacity = settings.autoMark ? "1" : "0.45";
 
@@ -6320,13 +6798,13 @@ function updateGpsDiagUI() {
   const text = gpsDiagText();
   const playEl = document.getElementById("gps-diag-line");
   if (playEl) {
-    const show = !!(settings.autoMark && currentRound);
+    const show = !!((settings.autoMark && currentRound) || calRecording || settings.showScoreHud);
     playEl.classList.toggle("show", show);
     if (show) playEl.textContent = text;
   }
   const lockEl = document.getElementById("pocket-lock-diag");
   if (lockEl) {
-    const show = !!(pocketLocked && settings.autoMark);
+    const show = !!(pocketLocked && (settings.autoMark || calRecording || settings.showScoreHud));
     lockEl.classList.toggle("show", show);
     if (show) lockEl.textContent = text;
   }
@@ -6340,7 +6818,8 @@ function onDeviceMotion(ev) {
   const now = Date.now();
   motionBuf.push({ t: now, m: mag });
   motionBuf = motionBuf.filter(s => now - s.t < 2500);
-  if (pocketLocked || settings.autoMark) updateGpsDiagUI();
+  if (pocketLocked || settings.autoMark || calRecording || settings.showScoreHud) updateGpsDiagUI();
+  if (calRecording) updateCalibrationOverlayUI();
 
   // Green tap / shake putt assist near pin
   if (!settings.greenTapPutts || !settings.autoMark || !currentRound || isTeeingOff) return;
@@ -6407,7 +6886,7 @@ function startMotionDiagListener() {
 }
 
 function stopMotionDiagListener() {
-  // Keep listening during auto-mark / hands-off / green tap; stop only when idle
+  if (calRecording) return;
   if (settings.autoMark || settings.greenTapPutts || (currentRound && settings.handsOff)) return;
   if (motionListener) {
     window.removeEventListener("devicemotion", motionListener, true);
