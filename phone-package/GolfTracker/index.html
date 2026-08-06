@@ -1162,6 +1162,17 @@
     </div>
 
     <div class="card">
+      <h3 style="margin-bottom:8px">Backup &amp; restore</h3>
+      <p class="modal-note" style="margin-bottom:10px">
+        Courses, rounds, settings, and map photos live in browser storage. Clearing site data or reinstalling the app removes them — download a backup file first and keep it in Downloads or cloud storage.
+      </p>
+      <p class="modal-note" id="backup-status-line" style="margin-bottom:12px">Last backup: never</p>
+      <button type="button" class="btn-primary" style="width:100%" onclick="exportBackupDownload()">Download backup file</button>
+      <button type="button" class="btn-secondary" style="width:100%;margin-top:10px" onclick="promptRestoreBackup()">Restore from backup file</button>
+      <input type="file" id="backup-file-input" accept=".json,application/json" style="display:none" onchange="onBackupFileSelected(event)">
+    </div>
+
+    <div class="card">
       <h3 style="margin-bottom:8px">Share / Feedback</h3>
       <p class="modal-note" style="margin-bottom:12px">Show the QR for the live GitHub Pages app (keeps your data on this device).</p>
       <button type="button" class="btn-primary" style="width:100%" onclick="openShareQrModal()">Share QR / Feedback</button>
@@ -1605,7 +1616,7 @@
   </div>
 
 <script>
-const APP_VERSION = "1.5.1";
+const APP_VERSION = "1.5.2";
 const PAGES_URL = "https://azzabazza11.github.io/golf-tracker/";
 const FEEDBACK_EMAIL = "aaron.callinan@gmail.com";
 const SUPPORT_URL = "https://ko-fi.com/aaroncallinan";
@@ -1632,6 +1643,7 @@ const CAL_GPS_WEIGHT_FAIRWAY = 0.6;
 const CAL_MOTION_WEIGHT_FAIRWAY = 0.4;
 const CAL_MAX_SAMPLES = 9000;
 const CAL_MARKER_TYPES = ["A_stop", "B_stroke", "C_practice", "D_putt", "pause_duck"];
+const BACKUP_FORMAT = "gst-backup-v1";
 
 const SENSITIVITY_DEFAULTS = {
   autoMarkSettleM: 3,
@@ -1719,6 +1731,7 @@ function loadSettings() {
       greenTapPutts: s.greenTapPutts !== false,
       voiceChimes: !!s.voiceChimes,
       showScoreHud: !!s.showScoreHud,
+      lastBackupAt: s.lastBackupAt || null,
       sensPreset: s.sensPreset === "strict" || s.sensPreset === "forgiving" ? s.sensPreset : "balanced"
     };
     Object.keys(SENSITIVITY_DEFAULTS).forEach(k => {
@@ -1738,6 +1751,7 @@ function loadSettings() {
       greenTapPutts: true,
       voiceChimes: false,
       showScoreHud: false,
+      lastBackupAt: null,
       sensPreset: "balanced",
       ...SENSITIVITY_DEFAULTS
     };
@@ -2747,6 +2761,166 @@ function saveData() {
     localStorage.setItem("gst_rounds", JSON.stringify(rounds));
   } catch (e) {
     showToast("Could not save data: " + e.message);
+  }
+}
+
+// ---------- Backup & restore (export to file survives site-data clears) ----------
+async function blobToDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result);
+    r.onerror = () => reject(r.error);
+    r.readAsDataURL(blob);
+  });
+}
+
+function dataUrlToBlob(dataUrl) {
+  const m = String(dataUrl).match(/^data:([^;]+);base64,(.+)$/);
+  if (!m) throw new Error("Invalid image data in backup");
+  const bin = atob(m[2]);
+  const arr = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+  return new Blob([arr], { type: m[1] });
+}
+
+async function idbGetAllImageKeys() {
+  try {
+    const db = await openMapDb();
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction("images", "readonly");
+      const req = tx.objectStore("images").getAllKeys();
+      req.onsuccess = () => resolve(req.result || []);
+      req.onerror = () => reject(req.error);
+    });
+  } catch (e) {
+    console.warn("idbGetAllImageKeys failed", e);
+    return [];
+  }
+}
+
+async function buildBackupPayload() {
+  const keys = await idbGetAllImageKeys();
+  const mapImages = {};
+  for (const key of keys) {
+    const blob = await idbGetImage(key);
+    if (blob) mapImages[key] = await blobToDataUrl(blob);
+  }
+  return {
+    format: BACKUP_FORMAT,
+    appVersion: APP_VERSION,
+    exportedAt: new Date().toISOString(),
+    courses,
+    rounds,
+    settings,
+    testChecklist: loadTestChecklist(),
+    mapImages
+  };
+}
+
+function backupFilename() {
+  const d = new Date();
+  const pad = n => String(n).padStart(2, "0");
+  return `golf-tracker-backup-${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}.json`;
+}
+
+async function exportBackupDownload() {
+  showToast("Preparing backup…");
+  try {
+    const payload = await buildBackupPayload();
+    const json = JSON.stringify(payload);
+    const blob = new Blob([json], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = backupFilename();
+    a.click();
+    URL.revokeObjectURL(a.href);
+    settings.lastBackupAt = payload.exportedAt;
+    saveSettings();
+    renderSettings();
+    const nImg = Object.keys(payload.mapImages || {}).length;
+    showToast(`Backup saved · ${courses.length} courses, ${rounds.length} rounds, ${nImg} photos`);
+  } catch (e) {
+    console.warn(e);
+    showToast("Backup failed — " + (e.message || "unknown error"));
+  }
+}
+
+function promptRestoreBackup() {
+  document.getElementById("backup-file-input")?.click();
+}
+
+async function onBackupFileSelected(ev) {
+  const file = ev.target.files && ev.target.files[0];
+  ev.target.value = "";
+  if (!file) return;
+  showToast("Reading backup…");
+  try {
+    const text = await file.text();
+    const data = JSON.parse(text);
+    if (!data || data.format !== BACKUP_FORMAT) {
+      showToast("Not a Shot Tracker backup file (expected gst-backup-v1)");
+      return;
+    }
+    if (!Array.isArray(data.courses) || !Array.isArray(data.rounds)) {
+      showToast("Backup file is missing courses or rounds");
+      return;
+    }
+    const nRounds = data.rounds.length;
+    const nCourses = data.courses.length;
+    const nImg = data.mapImages ? Object.keys(data.mapImages).length : 0;
+    if (!confirm(
+      `Restore backup from ${data.exportedAt ? new Date(data.exportedAt).toLocaleString() : "unknown date"}?\n\n` +
+      `${nCourses} courses, ${nRounds} rounds, ${nImg} map photos.\n\n` +
+      "This replaces all data currently on this device."
+    )) return;
+    if (!confirm("Really replace everything on this device with this backup?")) return;
+
+    courses = data.courses;
+    rounds = data.rounds;
+    saveData();
+
+    if (data.settings && typeof data.settings === "object") {
+      settings = loadSettings();
+      Object.assign(settings, data.settings);
+      saveSettings();
+      applyTheme();
+    }
+
+    if (data.testChecklist && typeof data.testChecklist === "object") {
+      testChecklistCache = data.testChecklist;
+      saveTestChecklist();
+    }
+
+    if (data.mapImages && typeof data.mapImages === "object") {
+      const keys = await idbGetAllImageKeys();
+      for (const key of keys) await idbDeleteImage(key);
+      for (const [key, dataUrl] of Object.entries(data.mapImages)) {
+        try {
+          await idbSetImage(key, dataUrlToBlob(dataUrl));
+        } catch (e) {
+          console.warn("Restore image failed", key, e);
+        }
+      }
+    }
+
+    currentCourse = null;
+    currentRound = null;
+    showScreen("home");
+    renderSettings();
+    showToast("Backup restored");
+  } catch (e) {
+    console.warn(e);
+    showToast("Restore failed — " + (e.message || "invalid file"));
+  }
+}
+
+function renderBackupStatus() {
+  const el = document.getElementById("backup-status-line");
+  if (!el) return;
+  if (settings.lastBackupAt) {
+    el.textContent = "Last backup: " + new Date(settings.lastBackupAt).toLocaleString();
+  } else {
+    el.textContent = "Last backup: never — download before clearing browser data";
   }
 }
 
@@ -5931,6 +6105,8 @@ function renderSettings() {
 
   const cur = document.getElementById("settings-current-version");
   if (cur) cur.textContent = APP_VERSION;
+
+  renderBackupStatus();
 
   const testCard = document.getElementById("test-mode-card");
   if (testCard) testCard.classList.toggle("show", !!settings.testUnlocked);
