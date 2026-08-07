@@ -1885,7 +1885,7 @@
     <div class="modal-content" style="max-height:90vh;overflow:auto">
       <h3 style="margin-bottom:8px">Green tap calibration</h3>
       <p class="modal-note" style="margin-bottom:10px">
-        Practice taps on the phone (no GPS needed). Valid taps are short <strong>impulses</strong>; sustained shaking is rejected. <strong>Min gap</strong> blocks consecutive counts; <strong>max window</strong> clears the 3-count if you wait too long between taps.
+        Practice taps on the phone (no GPS needed). Valid taps are short <strong>impulses</strong>; sustained shaking is rejected. <strong>Min gap</strong> blocks consecutive counts; <strong>max window</strong> clears the 3-count if you wait too long between taps. <strong>Lockout</strong> ignores taps for a while after a putt marks.
       </p>
       <div id="gtc-flash" style="text-align:center;font-size:22px;font-weight:700;min-height:36px;margin:8px 0;color:var(--accent)">Ready</div>
       <div class="card" style="margin:0 0 12px;padding:12px">
@@ -1931,7 +1931,7 @@
   </div>
 
 <script>
-const APP_VERSION = "1.5.30";
+const APP_VERSION = "1.5.31";
 const PAGES_URL = "https://azzabazza11.github.io/golf-tracker/";
 const FEEDBACK_EMAIL = "aaron.callinan@gmail.com";
 const SUPPORT_URL = "https://ko-fi.com/aaroncallinan";
@@ -1965,7 +1965,8 @@ const GREEN_TAP_SENS_KEYS = [
   "greenTapFloor",
   "greenTapImpulseMs",
   "greenTapRefractoryMs",
-  "greenTapWindowMs"
+  "greenTapWindowMs",
+  "greenTapLockoutS"
 ];
 const CALIBRATION_FORMAT = "gst-calibration-v1";
 const CALIBRATION_TICK_MS = 200;
@@ -2021,7 +2022,8 @@ const SENSITIVITY_DEFAULTS = {
   greenTapFloor: 5.5,
   greenTapImpulseMs: 180,
   greenTapRefractoryMs: 450,
-  greenTapWindowMs: 2800
+  greenTapWindowMs: 2800,
+  greenTapLockoutS: 1
 };
 
 const SENSITIVITY_PRESETS = {
@@ -2042,7 +2044,8 @@ const SENSITIVITY_PRESETS = {
     greenTapFloor: 6.5,
     greenTapImpulseMs: 150,
     greenTapRefractoryMs: 500,
-    greenTapWindowMs: 2600
+    greenTapWindowMs: 2600,
+    greenTapLockoutS: 2
   },
   balanced: { ...SENSITIVITY_DEFAULTS },
   forgiving: {
@@ -2062,7 +2065,8 @@ const SENSITIVITY_PRESETS = {
     greenTapFloor: 4.5,
     greenTapImpulseMs: 220,
     greenTapRefractoryMs: 400,
-    greenTapWindowMs: 3000
+    greenTapWindowMs: 3000,
+    greenTapLockoutS: 0.5
   }
 };
 
@@ -2083,7 +2087,8 @@ const SENSITIVITY_RANGES = {
   greenTapFloor: { min: 2, max: 15, step: 0.5, label: "Tap: min magnitude" },
   greenTapImpulseMs: { min: 20, max: 400, step: 5, label: "Tap: max impulse (ms)" },
   greenTapRefractoryMs: { min: 80, max: 2000, step: 10, label: "Tap: min gap between counts (ms)" },
-  greenTapWindowMs: { min: 300, max: 5000, step: 50, label: "Tap: max window for 3 counts (ms)" }
+  greenTapWindowMs: { min: 300, max: 5000, step: 50, label: "Tap: max window for 3 counts (ms)" },
+  greenTapLockoutS: { min: 0, max: 20, step: 0.5, label: "Tap: lockout after mark (s)" }
 };
 
 // Safe storage load — never reference `courses`/`rounds` inside this helper (avoids TDZ)
@@ -9099,7 +9104,7 @@ function onDeviceMotion(ev) {
     greenTapTimes = [];
     greenTapBumpCount = 0;
     lastGreenTapCountedAt = now;
-    greenTapArmUntil = now + GREEN_TAP_ARM_MS;
+    greenTapArmUntil = now + greenTapLockoutMs();
     tryGreenTapPutt(getBestMarkPosition() || currentPosition);
   }
 }
@@ -9108,6 +9113,12 @@ function greenTapMotionMean() {
   if (motionBuf.length < 3) return null;
   const vals = motionBuf.map(s => s.m);
   return vals.reduce((a, b) => a + b, 0) / vals.length;
+}
+
+function greenTapLockoutMs() {
+  const s = sens("greenTapLockoutS");
+  if (!Number.isFinite(s)) return GREEN_TAP_ARM_MS;
+  return Math.max(0, s) * 1000;
 }
 
 function greenTapRefractoryLimitMs() {
