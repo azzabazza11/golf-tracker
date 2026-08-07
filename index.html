@@ -1259,7 +1259,7 @@
     <details class="card settings-acc" id="sensitivity-card">
       <summary class="settings-acc-summary">Auto-mark sensitivity</summary>
       <div class="settings-acc-body">
-        <p class="modal-note" style="margin-bottom:8px">Motion stop peak + hold time arm the shot. After a swing, walk the confirm distance — then a short countdown marks (never resets). On green with green-tap on, hybrid pauses.</p>
+        <p class="modal-note" style="margin-bottom:8px">Motion stop peak + hold time arm the shot. After a swing, walk the set distance and the shot marks immediately. On green with green-tap on, hybrid pauses.</p>
         <div class="sens-presets" id="sens-presets">
           <button type="button" data-preset="strict" onclick="applySensPreset('strict')">Strict</button>
           <button type="button" data-preset="balanced" onclick="applySensPreset('balanced')">Balanced</button>
@@ -1753,7 +1753,7 @@
   </div>
 
 <script>
-const APP_VERSION = "1.5.16";
+const APP_VERSION = "1.5.17";
 const PAGES_URL = "https://azzabazza11.github.io/golf-tracker/";
 const FEEDBACK_EMAIL = "aaron.callinan@gmail.com";
 const SUPPORT_URL = "https://ko-fi.com/aaroncallinan";
@@ -1804,7 +1804,6 @@ const SENSITIVITY_DEFAULTS = {
   motionSensitivity: 5,
   motionStopPeak: 20,
   motionStopS: 3,
-  markConfirmS: 2,
   markConfirmMoveM: 3
 };
 
@@ -1821,7 +1820,6 @@ const SENSITIVITY_PRESETS = {
     motionSensitivity: 3,
     motionStopPeak: 14,
     motionStopS: 4,
-    markConfirmS: 2.5,
     markConfirmMoveM: 3
   },
   balanced: { ...SENSITIVITY_DEFAULTS },
@@ -1837,7 +1835,6 @@ const SENSITIVITY_PRESETS = {
     motionSensitivity: 7,
     motionStopPeak: 28,
     motionStopS: 2.5,
-    markConfirmS: 2,
     markConfirmMoveM: 3
   }
 };
@@ -1854,8 +1851,7 @@ const SENSITIVITY_RANGES = {
   motionSensitivity: { min: 1, max: 10, step: 1, label: "Swing keenness (1 strict → 10 keen)" },
   motionStopPeak: { min: 8, max: 45, step: 1, label: "Stop when motion peak ≤" },
   motionStopS: { min: 1, max: 10, step: 0.5, label: "Stop hold time (s)" },
-  markConfirmS: { min: 1, max: 8, step: 0.5, label: "Confirm countdown after move (s)" },
-  markConfirmMoveM: { min: 1, max: 8, step: 0.5, label: "Start confirm after move (m)" }
+  markConfirmMoveM: { min: 1, max: 8, step: 0.5, label: "Mark after walking (m)" }
 };
 
 // Safe storage load — never reference `courses`/`rounds` inside this helper (avoids TDZ)
@@ -2017,12 +2013,11 @@ let greenTapWasInZone = false;
 let courseSuggestId = null;
 let beginTeeChimedHole = null;
 
-// Hybrid auto-mark: motion stop → arm → swing → delayed confirm mark
+// Hybrid auto-mark: motion stop → arm → swing → walk away → mark
 let hybridStage = "watching"; // watching | settling | armed | shot_triggered | marked
 let hybridMarkSpot = null;    // GPS spot at arm / last refine before swing
 let hybridArmedAt = 0;
 let hybridSwingAt = 0;        // when swing was seen (shot_triggered)
-let hybridConfirmAt = 0;      // when confirm countdown started (after move) — never resets
 let hybridMarkedUntil = 0;
 let motionQuietSince = null;  // continuous-enough quiet clock start
 let motionLoudSince = null;   // spike above stop threshold (buffer)
@@ -7293,16 +7288,10 @@ function hybridStageTitle() {
   }
   if (stage === "armed") return "ARMED";
   if (stage === "shot_triggered") {
-    if (!hybridConfirmAt) {
-      const need = sens("markConfirmMoveM");
-      const away = metresFromMarkSpot();
-      const left = away == null ? need : Math.max(0, need - away);
-      return left > 0.05 ? `WALK ${left.toFixed(0)}m` : "WALK…";
-    }
-    const confS = sens("markConfirmS");
-    const elapsed = (Date.now() - hybridConfirmAt) / 1000;
-    const rem = Math.max(0, Math.ceil(confS - elapsed));
-    return rem > 0 ? `CONFIRMING ${rem}s` : "CONFIRMING…";
+    const need = sens("markConfirmMoveM");
+    const away = metresFromMarkSpot();
+    const left = away == null ? need : Math.max(0, need - away);
+    return left > 0.05 ? `WALK ${left.toFixed(0)}m` : "MARKING…";
   }
   if (stage === "marked") return "MARKED";
   return "WATCHING";
@@ -7504,7 +7493,6 @@ function resetHybridArm() {
   hybridMarkSpot = null;
   hybridArmedAt = 0;
   hybridSwingAt = 0;
-  hybridConfirmAt = 0;
   hybridMarkedUntil = 0;
   motionQuietSince = null;
   motionLoudSince = null;
@@ -7828,7 +7816,6 @@ function noteMarkEvent(opts) {
   hybridMarkSpot = null;
   hybridArmedAt = 0;
   hybridSwingAt = 0;
-  hybridConfirmAt = 0;
   motionQuietSince = null;
   motionLoudSince = null;
   hybridStage = fromTee ? "watching" : "marked";
@@ -8134,7 +8121,6 @@ function updateHybridAutoMark() {
       hybridMarkSpot = null;
       hybridArmedAt = 0;
       hybridSwingAt = 0;
-      hybridConfirmAt = 0;
       motionQuietSince = null;
       motionLoudSince = null;
       settleTempoWasSettling = false;
@@ -8168,18 +8154,13 @@ function updateHybridAutoMark() {
     return;
   }
 
-  // Confirm: walk markConfirmMoveM first, then countdown markConfirmS (never resets)
+  // After swing: walk markConfirmMoveM from the spot, then mark immediately
   if (hybridStage === "shot_triggered" && hybridMarkSpot) {
     const away = metresFromMarkSpot();
     const moveNeed = sens("markConfirmMoveM");
-    if (!hybridConfirmAt && away != null && away >= moveNeed) {
-      hybridConfirmAt = now;
-      lastToneLegend = `Confirm ${sens("markConfirmS")}s`;
-      pushTestLog("confirm_started", { away: Math.round(away * 10) / 10, moveM: moveNeed });
-      updateAmStageUI();
-    }
-    if (hybridConfirmAt && now - hybridConfirmAt >= sens("markConfirmS") * 1000) {
-      commitHybridAutoMark(hybridMarkSpot);
+    if (away != null && away >= moveNeed) {
+      pushTestLog("walk_confirm", { away: Math.round(away * 10) / 10, moveM: moveNeed });
+      commitHybridAutoMark(hybridMarkSpot, { afterWalk: true });
       tickSettleTempoAudio(cluster);
       updateAutoMarkCountdownUI();
       updateGpsDiagUI();
@@ -8232,7 +8213,6 @@ function updateHybridAutoMark() {
     if (isSwingBurst() || motionPeakHold >= swingArmThreshold()) {
       hybridStage = "shot_triggered";
       hybridSwingAt = now;
-      hybridConfirmAt = 0;
       const spot = pickHybridMarkSpot(cluster.centroid ? cluster : looseCluster);
       if (spot) hybridMarkSpot = spot;
       playShotTriggeredTone();
@@ -8242,7 +8222,6 @@ function updateHybridAutoMark() {
         {
           motionPeak: Math.round(motionPeakHold),
           mag: getMotionStats().mag,
-          confirmS: sens("markConfirmS"),
           moveM: sens("markConfirmMoveM")
         }
       );
@@ -8260,7 +8239,8 @@ function updateHybridAutoMark() {
   updateGpsDiagUI();
 }
 
-function commitHybridAutoMark(centroid) {
+function commitHybridAutoMark(centroid, opts) {
+  opts = opts || {};
   if (!autoMarkWatching || !currentRound || !anchorPosition || !centroid) return;
   const to = {
     lat: centroid.lat,
@@ -8273,20 +8253,29 @@ function commitHybridAutoMark(centroid) {
       lastGpsDeferReason = "unusual";
       maybeToastGpsDefer("GPS settling — unusual distance");
       playGpsDeferTone("unusual");
-    }
-    if (plaus.reason === "tooclose") {
-      pushTestLog("mark_deferred", { reason: "tooclose", dist: Math.round(plaus.dist) });
-      // Still too close — stay in shot_triggered, wait for more walk
+      resetHybridArm();
+      updateAmStageUI();
       return;
     }
-    resetHybridArm();
-    updateAmStageUI();
-    return;
+    if (plaus.reason === "tooclose") {
+      // Walk-away already confirmed the swing — don't strand on min-shot distance
+      if (!opts.afterWalk) {
+        pushTestLog("mark_deferred", { reason: "tooclose", dist: Math.round(plaus.dist) });
+        return;
+      }
+      pushTestLog("mark_short_accepted", { dist: Math.round(plaus.dist), afterWalk: true });
+    } else {
+      resetHybridArm();
+      updateAmStageUI();
+      return;
+    }
   }
 
   const hole = currentRound.holes[currentHoleIndex];
   const from = { ...anchorPosition };
-  const dist = plaus.dist;
+  const dist = plaus.dist != null
+    ? plaus.dist
+    : haversine(from.lat, from.lon, to.lat, to.lon);
   const shotNum = hole.shots.length + 1;
 
   const clubInfo = resolveAutoShotClub(shotNum);
