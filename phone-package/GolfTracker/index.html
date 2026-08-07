@@ -1259,7 +1259,7 @@
     <details class="card settings-acc" id="sensitivity-card">
       <summary class="settings-acc-summary">Auto-mark sensitivity</summary>
       <div class="settings-acc-body">
-        <p class="modal-note" style="margin-bottom:8px">Motion stop peak + hold time arm the shot. GPS refines location. Mark beeps only after post-swing delay + a small GPS move (avoids chiming mid-swing).</p>
+        <p class="modal-note" style="margin-bottom:8px">Motion stop peak + hold time arm the shot. After a swing, walk the confirm distance — then a short countdown marks (never resets). On green with green-tap on, hybrid pauses.</p>
         <div class="sens-presets" id="sens-presets">
           <button type="button" data-preset="strict" onclick="applySensPreset('strict')">Strict</button>
           <button type="button" data-preset="balanced" onclick="applySensPreset('balanced')">Balanced</button>
@@ -1753,7 +1753,7 @@
   </div>
 
 <script>
-const APP_VERSION = "1.5.11";
+const APP_VERSION = "1.5.12";
 const PAGES_URL = "https://azzabazza11.github.io/golf-tracker/";
 const FEEDBACK_EMAIL = "aaron.callinan@gmail.com";
 const SUPPORT_URL = "https://ko-fi.com/aaroncallinan";
@@ -1771,8 +1771,11 @@ const DEFAULT_MAP_VIEW = { offsetX: 0, offsetY: 0, scale: 1, rotation: 0 };
 const GPS_BUF_MAX_MS = 60000;
 const GPS_MAX_FOOT_SPEED_MS = 15;
 const COURSE_DETECT_M = 120;
-const GREEN_TAP_WINDOW_MS = 900;
+const GREEN_TAP_WINDOW_MS = 2800;
 const GREEN_TAP_COUNT = 3;
+const GREEN_TAP_REFRACTORY_MS = 450;
+const GREEN_TAP_ARM_MS = 900;
+const GREEN_TAP_EXIT_BUFFER_M = 4;
 const CALIBRATION_FORMAT = "gst-calibration-v1";
 const CALIBRATION_TICK_MS = 200;
 const CAL_MARK_THRESHOLD = 75;
@@ -1800,8 +1803,8 @@ const SENSITIVITY_DEFAULTS = {
   motionSensitivity: 5,
   motionStopPeak: 20,
   motionStopS: 3,
-  markConfirmS: 5,
-  markConfirmMoveM: 2
+  markConfirmS: 2,
+  markConfirmMoveM: 3
 };
 
 const SENSITIVITY_PRESETS = {
@@ -1817,7 +1820,7 @@ const SENSITIVITY_PRESETS = {
     motionSensitivity: 3,
     motionStopPeak: 14,
     motionStopS: 4,
-    markConfirmS: 6,
+    markConfirmS: 2.5,
     markConfirmMoveM: 3
   },
   balanced: { ...SENSITIVITY_DEFAULTS },
@@ -1833,8 +1836,8 @@ const SENSITIVITY_PRESETS = {
     motionSensitivity: 7,
     motionStopPeak: 28,
     motionStopS: 2.5,
-    markConfirmS: 4,
-    markConfirmMoveM: 1.5
+    markConfirmS: 2,
+    markConfirmMoveM: 3
   }
 };
 
@@ -1850,8 +1853,8 @@ const SENSITIVITY_RANGES = {
   motionSensitivity: { min: 1, max: 10, step: 1, label: "Swing keenness (1 strict → 10 keen)" },
   motionStopPeak: { min: 8, max: 45, step: 1, label: "Stop when motion peak ≤" },
   motionStopS: { min: 1, max: 10, step: 0.5, label: "Stop hold time (s)" },
-  markConfirmS: { min: 2, max: 12, step: 0.5, label: "Post-swing confirm delay (s)" },
-  markConfirmMoveM: { min: 0.5, max: 8, step: 0.5, label: "Confirm move from spot (m)" }
+  markConfirmS: { min: 1, max: 8, step: 0.5, label: "Confirm countdown after move (s)" },
+  markConfirmMoveM: { min: 1, max: 8, step: 0.5, label: "Start confirm after move (m)" }
 };
 
 // Safe storage load — never reference `courses`/`rounds` inside this helper (avoids TDZ)
@@ -2010,6 +2013,9 @@ let greenTapNearPin = false;
 let greenTapBumpCount = 0;
 let greenTapFlashUntil = 0;
 let lastGreenTapLogAt = 0;
+let lastGreenTapCountedAt = 0;
+let greenTapArmUntil = 0;     // ignore taps until this time after entering zone
+let greenTapWasInZone = false;
 let courseSuggestId = null;
 let beginTeeChimedHole = null;
 
@@ -2017,7 +2023,8 @@ let beginTeeChimedHole = null;
 let hybridStage = "watching"; // watching | settling | armed | shot_triggered | marked
 let hybridMarkSpot = null;    // GPS spot at arm / last refine before swing
 let hybridArmedAt = 0;
-let hybridSwingAt = 0;        // last swing burst time (confirm timer)
+let hybridSwingAt = 0;        // when swing was seen (shot_triggered)
+let hybridConfirmAt = 0;      // when confirm countdown started (after move) — never resets
 let hybridMarkedUntil = 0;
 let motionQuietSince = null;  // continuous-enough quiet clock start
 let motionLoudSince = null;   // spike above stop threshold (buffer)
@@ -7127,13 +7134,17 @@ function metresFromMarkSpot() {
   return haversine(hybridMarkSpot.lat, hybridMarkSpot.lon, pos.lat, pos.lon);
 }
 
-/** Green-tap zone: auto-mark hybrid pauses — tap putts only (either/or). */
+/** Green-tap zone with exit hysteresis (GPS flicker must not clear tap count). */
 function inGreenTapZone() {
   if (!settings.greenTapPutts || !settings.autoMark || !currentRound || isTeeingOff) return false;
   const pin = getPin(currentHoleIndex);
   const pos = getBestMarkPosition() || currentPosition;
   if (!pin || !pos) return false;
-  return haversine(pos.lat, pos.lon, pin.lat, pin.lon) <= sens("onGreenM");
+  const d = haversine(pos.lat, pos.lon, pin.lat, pin.lon);
+  const enterM = sens("onGreenM");
+  const leaveM = enterM + GREEN_TAP_EXIT_BUFFER_M;
+  if (greenTapWasInZone) return d <= leaveM;
+  return d <= enterM;
 }
 
 function hybridStageTitle() {
@@ -7149,8 +7160,14 @@ function hybridStageTitle() {
   }
   if (stage === "armed") return "ARMED";
   if (stage === "shot_triggered") {
+    if (!hybridConfirmAt) {
+      const need = sens("markConfirmMoveM");
+      const away = metresFromMarkSpot();
+      const left = away == null ? need : Math.max(0, need - away);
+      return left > 0.05 ? `WALK ${left.toFixed(0)}m` : "WALK…";
+    }
     const confS = sens("markConfirmS");
-    const elapsed = hybridSwingAt ? (Date.now() - hybridSwingAt) / 1000 : 0;
+    const elapsed = (Date.now() - hybridConfirmAt) / 1000;
     const rem = Math.max(0, Math.ceil(confS - elapsed));
     return rem > 0 ? `CONFIRMING ${rem}s` : "CONFIRMING…";
   }
@@ -7348,6 +7365,7 @@ function resetHybridArm() {
   hybridMarkSpot = null;
   hybridArmedAt = 0;
   hybridSwingAt = 0;
+  hybridConfirmAt = 0;
   hybridMarkedUntil = 0;
   motionQuietSince = null;
   motionLoudSince = null;
@@ -7679,6 +7697,7 @@ function noteMarkEvent() {
   hybridMarkSpot = null;
   hybridArmedAt = 0;
   hybridSwingAt = 0;
+  hybridConfirmAt = 0;
   motionQuietSince = null;
   motionLoudSince = null;
   hybridStage = "marked";
@@ -7820,51 +7839,69 @@ function onDeviceMotion(ev) {
   updateMotionPeakHold();
   if (pocketLocked || settings.autoMark || calRecording || settings.showScoreHud || settings.testMode) updateGpsDiagUI();
   if (calRecording) updateCalibrationOverlayUI();
+
+  const onGreen = inGreenTapZone();
+  // Hybrid first only off-green; on-green hybrid pauses inside updateHybridAutoMark
   if (autoMarkWatching) updateHybridAutoMark();
 
-  // Green tap / shake putt assist near pin
+  // Green tap — discrete taps with refractory (not every high-mag sample)
   if (!settings.greenTapPutts || !settings.autoMark || !currentRound || isTeeingOff) {
     greenTapNearPin = false;
     greenTapBumpCount = 0;
+    greenTapWasInZone = false;
     return;
   }
   if (teeHandoffInProgress || inTeeHandoffNearZone()) return;
-  const pin = getPin(currentHoleIndex);
-  const pos = getBestMarkPosition() || currentPosition;
-  if (!pin || !pos) {
+  if (!onGreen) {
     greenTapNearPin = false;
-    greenTapBumpCount = 0;
-    return;
-  }
-  const dPin = haversine(pos.lat, pos.lon, pin.lat, pin.lon);
-  if (dPin > sens("onGreenM")) {
-    greenTapTimes = [];
-    greenTapNearPin = false;
-    greenTapBumpCount = 0;
+    if (!greenTapWasInZone) {
+      greenTapTimes = [];
+      greenTapBumpCount = 0;
+    }
     return;
   }
   greenTapNearPin = true;
-  // Sharp bump: high instantaneous mag relative to recent mean
-  if (motionBuf.length < 3) return;
-  const vals = motionBuf.map(s => s.m);
-  const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
-  if (mag < mean + 2.2 && mag < 4.5) {
+  if (now < greenTapArmUntil) {
     greenTapBumpCount = greenTapTimes.length;
     updateAmStageUI();
     return;
   }
-  greenTapTimes.push(now);
-  greenTapTimes = greenTapTimes.filter(t => now - t < GREEN_TAP_WINDOW_MS * GREEN_TAP_COUNT);
-  greenTapBumpCount = greenTapTimes.length;
-  if (now - lastGreenTapLogAt > 400) {
-    lastGreenTapLogAt = now;
-    pushTestLog("green_tap_bump", { count: greenTapBumpCount, dPin: Math.round(dPin), mag: Math.round(mag * 10) / 10 });
+  if (now < autoMarkCooldownUntil || now - lastMarkAt < 8000) {
+    greenTapBumpCount = greenTapTimes.length;
+    updateAmStageUI();
+    return;
   }
+  if (motionBuf.length < 3) return;
+  const vals = motionBuf.map(s => s.m);
+  const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
+  const isBump = mag >= mean + 2.8 || mag >= 5.5;
+  if (!isBump) {
+    greenTapBumpCount = greenTapTimes.length;
+    updateAmStageUI();
+    return;
+  }
+  if (now - lastGreenTapCountedAt < GREEN_TAP_REFRACTORY_MS) {
+    greenTapBumpCount = greenTapTimes.length;
+    updateAmStageUI();
+    return;
+  }
+  lastGreenTapCountedAt = now;
+  greenTapTimes.push(now);
+  greenTapTimes = greenTapTimes.filter(t => now - t < GREEN_TAP_WINDOW_MS);
+  greenTapBumpCount = greenTapTimes.length;
+  pushTestLog("green_tap_bump", { count: greenTapBumpCount, dPin: Math.round(haversine(
+    (getBestMarkPosition() || currentPosition).lat,
+    (getBestMarkPosition() || currentPosition).lon,
+    getPin(currentHoleIndex).lat,
+    getPin(currentHoleIndex).lon
+  )), mag: Math.round(mag * 10) / 10 });
   updateAmStageUI();
   if (greenTapTimes.length >= GREEN_TAP_COUNT) {
     greenTapTimes = [];
     greenTapBumpCount = 0;
-    tryGreenTapPutt(pos);
+    lastGreenTapCountedAt = now;
+    greenTapArmUntil = now + GREEN_TAP_ARM_MS;
+    tryGreenTapPutt(getBestMarkPosition() || currentPosition);
   }
 }
 
@@ -7968,12 +8005,20 @@ function updateHybridAutoMark() {
 
   // Green tap on + near pin: pause hybrid entirely (either/or)
   if (inGreenTapZone()) {
+    if (!greenTapWasInZone) {
+      greenTapWasInZone = true;
+      greenTapTimes = [];
+      greenTapBumpCount = 0;
+      greenTapArmUntil = Date.now() + GREEN_TAP_ARM_MS;
+      lastGreenTapCountedAt = 0;
+    }
     if (hybridStage !== "watching" && hybridStage !== "marked") {
       pushTestLog("hybrid_paused_green", { was: hybridStage });
       hybridStage = "watching";
       hybridMarkSpot = null;
       hybridArmedAt = 0;
       hybridSwingAt = 0;
+      hybridConfirmAt = 0;
       motionQuietSince = null;
       motionLoudSince = null;
       settleTempoWasSettling = false;
@@ -7983,6 +8028,12 @@ function updateHybridAutoMark() {
     updateGpsDiagUI();
     updateAmStageUI();
     return;
+  }
+  if (greenTapWasInZone) {
+    greenTapWasInZone = false;
+    greenTapTimes = [];
+    greenTapBumpCount = 0;
+    greenTapNearPin = false;
   }
 
   const cluster = getSettleCluster();
@@ -8001,30 +8052,22 @@ function updateHybridAutoMark() {
     return;
   }
 
-  // Confirm mark: wait post-swing delay + GPS moved from settle spot (no mid-shot beeps)
-  if (hybridStage === "shot_triggered" && hybridMarkSpot && hybridSwingAt) {
-    const waitMs = sens("markConfirmS") * 1000;
+  // Confirm: walk markConfirmMoveM first, then countdown markConfirmS (never resets)
+  if (hybridStage === "shot_triggered" && hybridMarkSpot) {
     const away = metresFromMarkSpot();
-    const moved = away != null && away >= sens("markConfirmMoveM");
-    const waited = now - hybridSwingAt >= waitMs;
-    if (waited && moved) {
+    const moveNeed = sens("markConfirmMoveM");
+    if (!hybridConfirmAt && away != null && away >= moveNeed) {
+      hybridConfirmAt = now;
+      lastToneLegend = `Confirm ${sens("markConfirmS")}s`;
+      pushTestLog("confirm_started", { away: Math.round(away * 10) / 10, moveM: moveNeed });
+      updateAmStageUI();
+    }
+    if (hybridConfirmAt && now - hybridConfirmAt >= sens("markConfirmS") * 1000) {
       commitHybridAutoMark(hybridMarkSpot);
       tickSettleTempoAudio(cluster);
       updateAutoMarkCountdownUI();
       updateGpsDiagUI();
       return;
-    }
-    // Fresh swing near the ball resets confirm; walking-off motion must not
-    if (now - hybridSwingAt > 1400 && isSwingBurst()) {
-      const nearBall = away == null || away < sens("markConfirmMoveM");
-      if (nearBall) {
-        hybridSwingAt = now;
-        const spot = pickHybridMarkSpot(cluster.centroid ? cluster : looseCluster);
-        if (spot) hybridMarkSpot = spot;
-        pushTestLog("swing_retrigger", { motionPeak: Math.round(motionPeakHold) });
-        lastToneLegend = "Swing again — confirm reset";
-        updateAmStageUI();
-      }
     }
   }
 
@@ -8091,12 +8134,12 @@ function updateHybridAutoMark() {
     if (isSwingBurst() || motionPeakHold >= swingArmThreshold()) {
       hybridStage = "shot_triggered";
       hybridSwingAt = now;
+      hybridConfirmAt = 0;
       const spot = pickHybridMarkSpot(cluster.centroid ? cluster : looseCluster);
       if (spot) hybridMarkSpot = spot;
-      // Soft confirm only in test mode — loud mark beeps wait for confirm delay
       playShotTriggeredTone();
       setToneLegend(
-        `Shot seen — wait ${sens("markConfirmS")}s + move`,
+        `Shot seen — walk ${sens("markConfirmMoveM")} m`,
         "shot_triggered",
         {
           motionPeak: Math.round(motionPeakHold),
