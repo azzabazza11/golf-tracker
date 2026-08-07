@@ -1753,7 +1753,7 @@
   </div>
 
 <script>
-const APP_VERSION = "1.5.17";
+const APP_VERSION = "1.5.18";
 const PAGES_URL = "https://azzabazza11.github.io/golf-tracker/";
 const FEEDBACK_EMAIL = "aaron.callinan@gmail.com";
 const SUPPORT_URL = "https://ko-fi.com/aaroncallinan";
@@ -1786,6 +1786,27 @@ const CAL_MARKER_TYPES = ["A_stop", "B_stroke", "C_practice", "D_putt", "pause_d
 const BACKUP_FORMAT = "gst-backup-v1";
 const TEST_LOG_FORMAT = "gst-test-log-v1";
 const TEST_LOG_MAX = 2500;
+// #region agent log
+let _dbgLogCounts = Object.create(null);
+let _dbgLogWindowStart = 0;
+let _dbgFloodLogged = Object.create(null);
+function dbgAgentLog(hypothesisId, location, message, data) {
+  const payload = {
+    sessionId: "bd5109",
+    runId: "log-size",
+    hypothesisId,
+    location,
+    message,
+    data: data || {},
+    timestamp: Date.now()
+  };
+  fetch("http://127.0.0.1:7793/ingest/f0d0fbe2-c3e4-4c9c-8565-5e5906edabf9", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "bd5109" },
+    body: JSON.stringify(payload)
+  }).catch(() => {});
+}
+// #endregion
 const MOTION_PEAK_HALFLIFE_S = 1.6;
 const HYBRID_MARKED_FLASH_MS = 1800;
 /** Brief motion spikes above stop threshold are ignored this long (buffer). */
@@ -1847,7 +1868,7 @@ const SENSITIVITY_RANGES = {
   teeNearM: { min: 2, max: 8, step: 0.5, label: "Tee near radius (m)" },
   teeLeaveM: { min: 4, max: 15, step: 1, label: "Tee leave radius (m)" },
   pinAcceptM: { min: 5, max: 20, step: 1, label: "Pin accept radius (m)" },
-  onGreenM: { min: 8, max: 25, step: 1, label: "On-green radius (m)" },
+  onGreenM: { min: 3, max: 25, step: 1, label: "On-green radius (m)" },
   motionSensitivity: { min: 1, max: 10, step: 1, label: "Swing keenness (1 strict → 10 keen)" },
   motionStopPeak: { min: 8, max: 45, step: 1, label: "Stop when motion peak ≤" },
   motionStopS: { min: 1, max: 10, step: 0.5, label: "Stop hold time (s)" },
@@ -3244,6 +3265,7 @@ function updateLiveDistance() {
     syncPocketLockDistance("—");
     maybeRedrawLiveMap();
     checkTeeHandoffProximity();
+    maybeAutoTeeHandsOff();
     return;
   }
 
@@ -3258,7 +3280,30 @@ function updateLiveDistance() {
   if (document.getElementById("modal-tee").classList.contains("active")) {
     updateToHoleDisplay("tee-to-hole", currentPosition);
   }
+  refreshInProgressShotDistance();
   checkTeeHandoffProximity();
+  maybeAutoTeeHandsOff();
+}
+
+function refreshInProgressShotDistance() {
+  if (!(hybridStage === "shot_triggered" && autoMarkWatching && currentRound && anchorPosition)) return;
+  const list = document.getElementById("hole-shots");
+  if (!list) return;
+  const hole = currentRound.holes[currentHoleIndex];
+  const liveTo = currentPosition || hybridMarkSpot;
+  const liveDist = liveTo
+    ? haversine(anchorPosition.lat, anchorPosition.lon, liveTo.lat, liveTo.lon)
+    : null;
+  const nextN = hole.shots.length + 1;
+  const label = liveDist != null ? Math.round(liveDist) + " m" : "—";
+  let row = list.querySelector("[data-in-progress-shot]");
+  if (!row) {
+    row = document.createElement("li");
+    row.dataset.inProgressShot = "1";
+    row.style.color = "var(--accent)";
+    list.appendChild(row);
+  }
+  row.innerHTML = `<span>Shot ${nextN} · walking…</span><strong>${label}</strong>`;
 }
 
 // ---------- Course hole extras (pin + drives) ----------
@@ -3821,6 +3866,15 @@ function roundAwaitingFirstTee() {
     currentRound.holes.every(h => !h.teePosition && !(h.shots && h.shots.length)));
 }
 
+function maybeAutoTeeHandsOff() {
+  if (!currentRound || currentRound.mode !== "handsOff" || !settings.autoMark) return;
+  if (!isTeeingOff) return;
+  // First tee still uses Begin Round once; every later tee is automatic
+  if (roundAwaitingFirstTee()) return;
+  if (teeHandoffInProgress) return;
+  autoTeeOffSilent();
+}
+
 /** Hands-off: keep current hole = nearest known tee until Begin Round / auto tee. */
 function maybeUpdateNearestHoleWhileWaiting() {
   if (!currentRound || currentRound.mode !== "handsOff") return;
@@ -3959,16 +4013,28 @@ function updatePlayUI() {
     `Hole ${hole.holeNumber} · Par ${hole.par}`;
 
   const list = document.getElementById("hole-shots");
-  if (hole.shots.length === 0) {
+  if (hole.shots.length === 0 && !(hybridStage === "shot_triggered" && autoMarkWatching)) {
     list.innerHTML = `<li style="color:var(--muted)">No shots yet</li>`;
   } else {
-    list.innerHTML = hole.shots.map((s, idx) => {
+    const rows = hole.shots.map((s, idx) => {
       const clubLabel = shotClubDisplayHtml(s);
       return `<li class="editable" onclick="openClubEditLive(${idx})">
         <span>Shot ${s.number} · ${clubLabel}${s.auto ? " · auto" : ""}</span>
         <strong>${Math.round(s.distance)} m</strong>
       </li>`;
-    }).join("");
+    });
+    if (hybridStage === "shot_triggered" && autoMarkWatching && anchorPosition) {
+      const liveTo = (currentPosition || hybridMarkSpot);
+      const liveDist = liveTo
+        ? haversine(anchorPosition.lat, anchorPosition.lon, liveTo.lat, liveTo.lon)
+        : null;
+      const nextN = hole.shots.length + 1;
+      rows.push(`<li data-in-progress-shot="1" style="color:var(--accent)">
+        <span>Shot ${nextN} · walking…</span>
+        <strong>${liveDist != null ? Math.round(liveDist) + " m" : "—"}</strong>
+      </li>`);
+    }
+    list.innerHTML = rows.join("");
   }
 
   const btn = document.getElementById("btn-main");
@@ -3976,10 +4042,18 @@ function updatePlayUI() {
 
   if (isTeeingOff) {
     const isStart = currentRound.holes.every(h => !h.teePosition && !(h.shots && h.shots.length));
-    btn.textContent = isStart ? "Begin Round" : "Tee Off";
+    const handsAuto = currentRound.mode === "handsOff" && settings.autoMark;
+    if (handsAuto && !isStart) {
+      btn.textContent = "Auto teeing…";
+      btn.disabled = true;
+    } else {
+      btn.textContent = isStart ? "Begin Round" : "Tee Off";
+      btn.disabled = false;
+    }
     btnOut.style.display = "none";
   } else {
     btn.textContent = "Mark Shot";
+    btn.disabled = false;
     btnOut.style.display = "block";
   }
 
@@ -4214,6 +4288,7 @@ function advanceAfterHoleOut(opts) {
     mockMoveStep = 0;
     updatePlayUI();
     if (keepLock && pocketLocked) updatePocketLockInfo();
+    maybeAutoTeeHandsOff();
   } else {
     if (keepLock) unlockPocketLock();
     stopGPS();
@@ -7446,6 +7521,30 @@ function tickTestHeartbeat() {
 function pushTestLog(type, data) {
   if (!settings.testMode) return;
   if (!testPlayLogStartedAt) testPlayLogStartedAt = Date.now();
+  // #region agent log
+  const _now = Date.now();
+  if (!_dbgLogWindowStart || _now - _dbgLogWindowStart > 1000) {
+    _dbgLogCounts = Object.create(null);
+    _dbgLogWindowStart = _now;
+    _dbgFloodLogged = Object.create(null);
+  }
+  _dbgLogCounts[type] = (_dbgLogCounts[type] || 0) + 1;
+  if (_dbgLogCounts[type] === 20 && !_dbgFloodLogged[type]) {
+    _dbgFloodLogged[type] = 1;
+    dbgAgentLog("H-D", "pushTestLog", "high_freq_log_type", {
+      type,
+      perSec: _dbgLogCounts[type],
+      logLen: testPlayLog.length,
+      stage: hybridStage
+    });
+  }
+  // #endregion
+  // Rate-limit hot types that previously blew the export to ~400KB
+  if (type === "mark_deferred" || type === "walk_confirm") {
+    const key = "_last_" + type;
+    if (pushTestLog[key] && _now - pushTestLog[key] < 2000) return;
+    pushTestLog[key] = _now;
+  }
   testPlayLog.push({
     t: Date.now() - testPlayLogStartedAt,
     at: new Date().toISOString(),
@@ -7454,7 +7553,16 @@ function pushTestLog(type, data) {
     stage: hybridStage,
     ...(data || {})
   });
-  if (testPlayLog.length > TEST_LOG_MAX) testPlayLog = testPlayLog.slice(-TEST_LOG_MAX);
+  if (testPlayLog.length > TEST_LOG_MAX) {
+    // #region agent log
+    dbgAgentLog("H-E", "pushTestLog", "test_log_trimmed", {
+      type,
+      logLen: testPlayLog.length,
+      max: TEST_LOG_MAX
+    });
+    // #endregion
+    testPlayLog = testPlayLog.slice(-TEST_LOG_MAX);
+  }
 }
 
 function exportTestPlayLog() {
@@ -7462,6 +7570,15 @@ function exportTestPlayLog() {
     showToast("No test log events yet — play with Test mode on");
     return;
   }
+  // #region agent log
+  const _hist = {};
+  for (const e of testPlayLog) _hist[e.type] = (_hist[e.type] || 0) + 1;
+  dbgAgentLog("H-E", "exportTestPlayLog", "export_histogram", {
+    n: testPlayLog.length,
+    hist: _hist,
+    appVersion: APP_VERSION
+  });
+  // #endregion
   const payload = {
     format: TEST_LOG_FORMAT,
     appVersion: APP_VERSION,
@@ -7790,7 +7907,8 @@ function completeTeeHandoff(target) {
       const keepLock = pocketLocked;
       advanceAfterHoleOut({ keepLock });
       if (!autoTeeOffSilent()) {
-        showToast("At next tee — tap Tee Off when ready");
+        showToast("At next tee — waiting for GPS to auto tee");
+        maybeAutoTeeHandsOff();
       }
       recordTestEvent("tee_handoff");
       return;
@@ -7798,7 +7916,8 @@ function completeTeeHandoff(target) {
 
     if (target.mode === "teeOff") {
       if (!autoTeeOffSilent()) {
-        showToast("At tee — tap Tee Off when ready");
+        showToast("At tee — waiting for GPS to auto tee");
+        maybeAutoTeeHandsOff();
       } else {
         recordTestEvent("tee_handoff");
       }
@@ -8159,8 +8278,37 @@ function updateHybridAutoMark() {
     const away = metresFromMarkSpot();
     const moveNeed = sens("markConfirmMoveM");
     if (away != null && away >= moveNeed) {
-      pushTestLog("walk_confirm", { away: Math.round(away * 10) / 10, moveM: moveNeed });
-      commitHybridAutoMark(hybridMarkSpot, { afterWalk: true });
+      // #region agent log
+      dbgAgentLog("H-C", "updateHybridAutoMark:walk", "walk_gate_hit", {
+        away: Math.round(away * 10) / 10,
+        moveNeed,
+        stage: hybridStage,
+        logLen: testPlayLog.length
+      });
+      // #endregion
+      // Prefer current GPS if you've walked farther from anchor than the swing spot
+      // (live Current Distance should match the marked shot).
+      let markAt = hybridMarkSpot;
+      const cur = getBestMarkPosition() || currentPosition;
+      if (cur && anchorPosition) {
+        const dSpot = haversine(anchorPosition.lat, anchorPosition.lon, hybridMarkSpot.lat, hybridMarkSpot.lon);
+        const dCur = haversine(anchorPosition.lat, anchorPosition.lon, cur.lat, cur.lon);
+        if (dCur > dSpot + 1) markAt = { lat: cur.lat, lon: cur.lon, accuracy: cur.accuracy };
+      }
+      pushTestLog("walk_confirm", {
+        away: Math.round(away * 10) / 10,
+        moveM: moveNeed,
+        markDist: anchorPosition && markAt
+          ? Math.round(haversine(anchorPosition.lat, anchorPosition.lon, markAt.lat, markAt.lon))
+          : null
+      });
+      commitHybridAutoMark(markAt, { afterWalk: true });
+      // #region agent log
+      dbgAgentLog("H-C", "updateHybridAutoMark:walk", "after_commit_walk", {
+        stage: hybridStage,
+        logLen: testPlayLog.length
+      });
+      // #endregion
       tickSettleTempoAudio(cluster);
       updateAutoMarkCountdownUI();
       updateGpsDiagUI();
@@ -8248,6 +8396,15 @@ function commitHybridAutoMark(centroid, opts) {
     accuracy: centroid.accuracy
   };
   const plaus = checkShotPlausibility(anchorPosition, to);
+  // #region agent log
+  dbgAgentLog("H-A", "commitHybridAutoMark", "plaus_check", {
+    ok: !!plaus.ok,
+    reason: plaus.reason || null,
+    dist: plaus.dist != null ? Math.round(plaus.dist * 10) / 10 : null,
+    afterWalk: !!opts.afterWalk,
+    stage: hybridStage
+  });
+  // #endregion
   if (!plaus.ok) {
     if (plaus.reason === "unusual") {
       lastGpsDeferReason = "unusual";
@@ -8260,6 +8417,12 @@ function commitHybridAutoMark(centroid, opts) {
     if (plaus.reason === "tooclose") {
       // Walk-away already confirmed the swing — don't strand on min-shot distance
       if (!opts.afterWalk) {
+        // #region agent log
+        dbgAgentLog("H-A", "commitHybridAutoMark", "mark_deferred_tooclose", {
+          dist: Math.round(plaus.dist),
+          logLen: testPlayLog.length
+        });
+        // #endregion
         pushTestLog("mark_deferred", { reason: "tooclose", dist: Math.round(plaus.dist) });
         return;
       }
