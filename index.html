@@ -1753,7 +1753,7 @@
   </div>
 
 <script>
-const APP_VERSION = "1.5.19";
+const APP_VERSION = "1.5.20";
 const PAGES_URL = "https://azzabazza11.github.io/golf-tracker/";
 const FEEDBACK_EMAIL = "aaron.callinan@gmail.com";
 const SUPPORT_URL = "https://ko-fi.com/aaroncallinan";
@@ -3846,25 +3846,71 @@ function roundAwaitingFirstTee() {
     currentRound.holes.every(h => !h.teePosition && !(h.shots && h.shots.length)));
 }
 
+function metresToCurrentHoleTee() {
+  if (!currentRound || !currentPosition) return null;
+  const tee = knownTeeForHole(
+    currentRound.courseId,
+    currentHoleIndex,
+    currentRound.holes[currentHoleIndex]
+  );
+  if (!tee) return null;
+  return haversine(currentPosition.lat, currentPosition.lon, tee.lat, tee.lon);
+}
+
+function nearCurrentHoleTee() {
+  const d = metresToCurrentHoleTee();
+  if (d == null) return false;
+  return d <= sens("teeNearM");
+}
+
 function maybeAutoTeeHandsOff() {
   if (!currentRound || currentRound.mode !== "handsOff") return;
   if (!isTeeingOff) return;
-  // First tee still uses Begin Round once; every later tee is automatic
+  // First tee still uses Begin Round once; every later tee waits until near that tee
   if (roundAwaitingFirstTee()) return;
   if (teeHandoffInProgress) return;
-  // Prefer auto-mark path; still tee silently even if auto-mark toggle is off
-  if (!autoTeeOffSilent() && settings.autoMark) {
+
+  const known = knownTeeForHole(
+    currentRound.courseId,
+    currentHoleIndex,
+    currentRound.holes[currentHoleIndex]
+  );
+  const dTee = metresToCurrentHoleTee();
+  if (known) {
+    if (dTee == null || dTee > sens("teeNearM")) {
+      updateWaitingNextTeeHint(dTee);
+      return;
+    }
+  } else if (!(getBestMarkPosition() || currentPosition)) {
+    updateWaitingNextTeeHint(null);
+    return;
+  }
+
+  if (!autoTeeOffSilent()) {
+    updateWaitingNextTeeHint(dTee);
     // #region agent log
     dbgAgentLog("H-TEE", "maybeAutoTeeHandsOff", "auto_tee_failed", {
       hole: currentHoleIndex + 1,
+      dTee: dTee != null ? Math.round(dTee) : null,
       hasPos: !!(getBestMarkPosition() || currentPosition),
-      hasKnown: !!knownTeeForHole(
-        currentRound.courseId,
-        currentHoleIndex,
-        currentRound.holes[currentHoleIndex]
-      )
+      hasKnown: !!known
     });
     // #endregion
+  }
+}
+
+function updateWaitingNextTeeHint(dTee) {
+  const clubEl = document.getElementById("current-club-display");
+  if (!clubEl || !currentRound || !isTeeingOff) return;
+  const hole = currentRound.holes[currentHoleIndex];
+  const distBit = dTee != null && Number.isFinite(dTee)
+    ? ` · ${Math.round(dTee)} m away`
+    : "";
+  clubEl.textContent = `Walk to hole ${hole.holeNumber} tee${distBit}`;
+  const btn = document.getElementById("btn-main");
+  if (btn && currentRound.mode === "handsOff") {
+    btn.textContent = dTee != null ? `Walk to tee (${Math.round(dTee)} m)` : "Walk to next tee";
+    btn.disabled = true;
   }
 }
 
@@ -4028,7 +4074,8 @@ function updatePlayUI() {
         btn.textContent = "Begin Round";
         btn.disabled = false;
       } else {
-        btn.textContent = "Auto teeing…";
+        const dTee = metresToCurrentHoleTee();
+        btn.textContent = dTee != null ? `Walk to tee (${Math.round(dTee)} m)` : "Walk to next tee";
         btn.disabled = true;
         maybeAutoTeeHandsOff();
       }
@@ -4064,6 +4111,8 @@ function updatePlayUI() {
         ? findNearestTeeIndex(currentCourse, currentPosition)
         : null;
       updateWaitingTeeHint(nearest || { dist: null });
+    } else if (isTeeingOff && currentRound && currentRound.mode === "handsOff") {
+      updateWaitingNextTeeHint(metresToCurrentHoleTee());
     } else if (isTeeingOff) {
       clubEl.textContent = "";
     } else if (clubForCurrentShot) {
@@ -7847,8 +7896,24 @@ function autoTeeOffSilent() {
   if (!hole) return false;
 
   const known = knownTeeForHole(currentRound.courseId, currentHoleIndex, hole);
-  const pos = getBestMarkPosition() || currentPosition || known;
+  const gps = getBestMarkPosition() || currentPosition;
+  // Prefer GPS when standing at/near known tee; never use a far-away GPS as the tee mark
+  let pos = null;
+  if (known && gps) {
+    const d = haversine(gps.lat, gps.lon, known.lat, known.lon);
+    pos = d <= sens("teeLeaveM") ? gps : known;
+  } else {
+    pos = gps || known;
+  }
   if (!pos) return false;
+
+  // Subsequent hands-off tees must be in range of the known tee (Begin Round may skip this)
+  if (currentRound.mode === "handsOff" && !roundAwaitingFirstTee() && known) {
+    const d = gps
+      ? haversine(gps.lat, gps.lon, known.lat, known.lon)
+      : Infinity;
+    if (d > sens("teeNearM")) return false;
+  }
 
   const typical = typicalClubForHole(currentRound.courseId, currentHoleIndex, 1);
   hole.teePosition = {
@@ -7875,7 +7940,13 @@ function autoTeeOffSilent() {
   showToast(typical
     ? `Hole ${hole.holeNumber} · auto tee · typical ${typical}`
     : `Hole ${hole.holeNumber} · auto tee · watching for swing`);
-  pushTestLog("auto_tee", { hole: hole.holeNumber, typical: typical || null });
+  pushTestLog("auto_tee", {
+    hole: hole.holeNumber,
+    typical: typical || null,
+    dTee: known && gps
+      ? Math.round(haversine(gps.lat, gps.lon, known.lat, known.lon))
+      : null
+  });
   return true;
 }
 
