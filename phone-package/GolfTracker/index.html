@@ -870,6 +870,45 @@
     #test-mode-card { display: none; }
     #test-mode-card.show { display: block; }
 
+    details.settings-acc {
+      padding-top: 14px;
+      padding-bottom: 14px;
+    }
+    details.settings-acc > .settings-acc-summary {
+      list-style: none;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      font-size: 16px;
+      font-weight: 600;
+      color: var(--text);
+      user-select: none;
+      -webkit-user-select: none;
+      touch-action: manipulation;
+    }
+    details.settings-acc > .settings-acc-summary::-webkit-details-marker { display: none; }
+    details.settings-acc > .settings-acc-summary::after {
+      content: "▾";
+      flex: 0 0 auto;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 500;
+      transition: transform 0.15s ease;
+    }
+    details.settings-acc:not([open]) > .settings-acc-summary::after {
+      transform: rotate(-90deg);
+    }
+    details.settings-acc[open] > .settings-acc-summary {
+      margin-bottom: 10px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--border);
+    }
+    details.settings-acc .settings-acc-body {
+      padding-top: 2px;
+    }
+
     .cal-overlay {
       display: none;
       position: fixed;
@@ -1217,116 +1256,128 @@
       </div>
     </div>
 
-    <div class="card" id="sensitivity-card">
-      <h3 style="margin-bottom:6px">Auto-mark sensitivity</h3>
-      <p class="modal-note" style="margin-bottom:8px">Motion stop peak + hold time arm the shot. GPS refines location. Mark beeps only after post-swing delay + a small GPS move (avoids chiming mid-swing).</p>
-      <div class="sens-presets" id="sens-presets">
-        <button type="button" data-preset="strict" onclick="applySensPreset('strict')">Strict</button>
-        <button type="button" data-preset="balanced" onclick="applySensPreset('balanced')">Balanced</button>
-        <button type="button" data-preset="forgiving" onclick="applySensPreset('forgiving')">Forgiving</button>
-      </div>
-      <div id="sens-sliders"></div>
-      <p class="sens-summary" id="sens-summary"></p>
-    </div>
-
-    <div class="card">
-      <h3 style="margin-bottom:8px">Backup &amp; restore</h3>
-      <p class="modal-note" style="margin-bottom:10px">
-        Courses, rounds, settings, and map photos live in browser storage. Clearing site data or reinstalling the app removes them — download a backup file first and keep it in Downloads or cloud storage.
-      </p>
-      <p class="modal-note" id="backup-status-line" style="margin-bottom:12px">Last backup: never</p>
-      <button type="button" class="btn-primary" style="width:100%" onclick="exportBackupDownload()">Download backup file</button>
-      <button type="button" class="btn-secondary" style="width:100%;margin-top:10px" onclick="promptRestoreBackup()">Restore from backup file</button>
-      <input type="file" id="backup-file-input" accept=".json,application/json" style="display:none" onchange="onBackupFileSelected(event)">
-    </div>
-
-    <div class="card">
-      <h3 style="margin-bottom:8px">Share / Feedback</h3>
-      <p class="modal-note" style="margin-bottom:12px">Show the QR for the live GitHub Pages app (keeps your data on this device).</p>
-      <button type="button" class="btn-primary" style="width:100%" onclick="openShareQrModal()">Share QR / Feedback</button>
-    </div>
-
-    <div class="card">
-      <h3 style="margin-bottom:8px" id="about-heading" onclick="onAboutSecretTap()">About</h3>
-      <p class="modal-note" style="margin-bottom:10px">
-        Shot Tracker started as a way to keep score and distances on the course without accounts, ads, or sending your rounds to a server. GPS marks and maps stay on your phone.
-      </p>
-      <p class="modal-note" style="margin-bottom:10px">
-        The idea is simple tracking you can trust in the pocket: tee off, mark, hole out, review later. Share the live link; each device keeps its own data.
-      </p>
-      <p class="modal-note" style="margin-bottom:14px">
-        Shot Tracker is free to use and will stay free — no paywall, no subscription.
-      </p>
-      <p class="modal-note" style="margin-bottom:10px">
-        If Shot Tracker helped your round and you want to shout me a coffee, thank you for backing the project.
-      </p>
-      <button type="button" class="btn-warning" style="width:100%" onclick="openSupportLink()">Support on Ko-fi</button>
-      <p class="modal-note" style="margin-top:8px">Thanks for helping keep it simple, free, and improving.</p>
-      <p class="modal-note" style="margin-top:12px">App version v<span id="settings-current-version"></span></p>
-      <button type="button" class="btn-secondary" style="width:100%;margin-top:10px" onclick="forceAppUpdate()">Get latest version</button>
-      <p class="modal-note" style="margin-top:8px;font-size:12px">Stuck on an old version? Tap above after clearing site data, or use Chrome site settings → Clear &amp; reset for this site.</p>
-    </div>
-
-    <div class="card" id="calibration-card">
-      <h3 style="margin-bottom:6px">Calibration mode</h3>
-      <p class="modal-note" style="margin-bottom:10px">
-        Record GPS + motion for tuning auto-mark. Hands-free: start, walk your protocol, stop &amp; export JSON to share for analysis.
-      </p>
-      <details class="cal-protocol">
-        <summary>Container A/B/C/D protocol (~10 min)</summary>
-        <p style="margin:8px 0 0">Loop 2m→6m→2m→6m at each corner:</p>
-        <ul style="margin:6px 0 0 16px;padding:0">
-          <li><strong>A</strong> — stop 8–10s, no swing (×3 slow)</li>
-          <li><strong>B</strong> — stop, 1 pretend stroke, stand 5s (×3 slow)</li>
-          <li><strong>C</strong> — 2–3 practice swings, no hit (×2)</li>
-          <li><strong>D</strong> — short shuffle + soft taps (×2)</li>
-          <li><strong>A+B</strong> — repeat at vigorous walk (×3)</li>
-        </ul>
-        <p style="margin:8px 0 0">Same pocket every time. Keep the screen awake (app will try to hold it). Optional: tap recording screen to drop a marker.</p>
-      </details>
-      <div class="setting-row" style="margin-top:12px">
-        <div class="setting-text">
-          <strong>Show score bars in play</strong>
-          <span>GPS / motion / combined % on the play screen (debug).</span>
+    <details class="card settings-acc" id="sensitivity-card">
+      <summary class="settings-acc-summary">Auto-mark sensitivity</summary>
+      <div class="settings-acc-body">
+        <p class="modal-note" style="margin-bottom:8px">Motion stop peak + hold time arm the shot. GPS refines location. Mark beeps only after post-swing delay + a small GPS move (avoids chiming mid-swing).</p>
+        <div class="sens-presets" id="sens-presets">
+          <button type="button" data-preset="strict" onclick="applySensPreset('strict')">Strict</button>
+          <button type="button" data-preset="balanced" onclick="applySensPreset('balanced')">Balanced</button>
+          <button type="button" data-preset="forgiving" onclick="applySensPreset('forgiving')">Forgiving</button>
         </div>
-        <label class="switch">
-          <input type="checkbox" id="setting-show-scores" onchange="onShowScoreHudToggle(this.checked)">
-          <span class="slider"></span>
-        </label>
+        <div id="sens-sliders"></div>
+        <p class="sens-summary" id="sens-summary"></p>
       </div>
-      <button type="button" class="btn-primary" style="width:100%;margin-top:12px" id="btn-start-calibration" onclick="startCalibrationSession()">Start calibration session</button>
-      <button type="button" class="btn-secondary" style="width:100%;margin-top:10px" onclick="openCalibrationHelp()">Export format &amp; tips</button>
-    </div>
+    </details>
 
-    <div class="card" id="test-mode-card">
-      <h3 style="margin-bottom:8px">Test mode</h3>
-      <p class="modal-note" style="margin-bottom:12px">
-        On-course checklist: features check off automatically as you use them. Progress stays on this device.
-      </p>
-      <div class="setting-row">
-        <div class="setting-text">
-          <strong>Track live tests</strong>
-          <span>Checklist + rising settle tone, GPS defer blips, and a play log for upload.</span>
-        </div>
-        <label class="switch">
-          <input type="checkbox" id="setting-test-mode" onchange="onTestModeToggle(this.checked)">
-          <span class="slider"></span>
-        </label>
+    <details class="card settings-acc">
+      <summary class="settings-acc-summary">Backup &amp; restore</summary>
+      <div class="settings-acc-body">
+        <p class="modal-note" style="margin-bottom:10px">
+          Courses, rounds, settings, and map photos live in browser storage. Clearing site data or reinstalling the app removes them — download a backup file first and keep it in Downloads or cloud storage.
+        </p>
+        <p class="modal-note" id="backup-status-line" style="margin-bottom:12px">Last backup: never</p>
+        <button type="button" class="btn-primary" style="width:100%" onclick="exportBackupDownload()">Download backup file</button>
+        <button type="button" class="btn-secondary" style="width:100%;margin-top:10px" onclick="promptRestoreBackup()">Restore from backup file</button>
+        <input type="file" id="backup-file-input" accept=".json,application/json" style="display:none" onchange="onBackupFileSelected(event)">
       </div>
-      <div class="setting-row">
-        <div class="setting-text">
-          <strong>Heartbeat chime (test only)</strong>
-          <span>Soft tick every ~40s while auto-mark is watching — confirms the app is awake.</span>
-        </div>
-        <label class="switch">
-          <input type="checkbox" id="setting-test-heartbeat" onchange="onTestHeartbeatToggle(this.checked)">
-          <span class="slider"></span>
-        </label>
+    </details>
+
+    <details class="card settings-acc">
+      <summary class="settings-acc-summary">Share / Feedback</summary>
+      <div class="settings-acc-body">
+        <p class="modal-note" style="margin-bottom:12px">Show the QR for the live GitHub Pages app (keeps your data on this device).</p>
+        <button type="button" class="btn-primary" style="width:100%" onclick="openShareQrModal()">Share QR / Feedback</button>
       </div>
-      <button type="button" class="btn-primary" style="width:100%;margin-top:8px" onclick="openTestChecklist()">Open checklist</button>
-      <button type="button" class="btn-secondary" style="width:100%;margin-top:10px" onclick="exportTestPlayLog()">Export test play log</button>
-      <button type="button" class="btn-secondary" style="width:100%;margin-top:10px" onclick="resetTestChecklist()">Reset checklist</button>
-    </div>
+    </details>
+
+    <details class="card settings-acc">
+      <summary class="settings-acc-summary" id="about-heading" onclick="onAboutSecretTap()">About</summary>
+      <div class="settings-acc-body">
+        <p class="modal-note" style="margin-bottom:10px">
+          Shot Tracker started as a way to keep score and distances on the course without accounts, ads, or sending your rounds to a server. GPS marks and maps stay on your phone.
+        </p>
+        <p class="modal-note" style="margin-bottom:10px">
+          The idea is simple tracking you can trust in the pocket: tee off, mark, hole out, review later. Share the live link; each device keeps its own data.
+        </p>
+        <p class="modal-note" style="margin-bottom:14px">
+          Shot Tracker is free to use and will stay free — no paywall, no subscription.
+        </p>
+        <p class="modal-note" style="margin-bottom:10px">
+          If Shot Tracker helped your round and you want to shout me a coffee, thank you for backing the project.
+        </p>
+        <button type="button" class="btn-warning" style="width:100%" onclick="openSupportLink()">Support on Ko-fi</button>
+        <p class="modal-note" style="margin-top:8px">Thanks for helping keep it simple, free, and improving.</p>
+        <p class="modal-note" style="margin-top:12px">App version v<span id="settings-current-version"></span></p>
+        <button type="button" class="btn-secondary" style="width:100%;margin-top:10px" onclick="forceAppUpdate()">Get latest version</button>
+        <p class="modal-note" style="margin-top:8px;font-size:12px">Stuck on an old version? Tap above after clearing site data, or use Chrome site settings → Clear &amp; reset for this site.</p>
+      </div>
+    </details>
+
+    <details class="card settings-acc" id="calibration-card">
+      <summary class="settings-acc-summary">Calibration mode</summary>
+      <div class="settings-acc-body">
+        <p class="modal-note" style="margin-bottom:10px">
+          Record GPS + motion for tuning auto-mark. Hands-free: start, walk your protocol, stop &amp; export JSON to share for analysis.
+        </p>
+        <details class="cal-protocol">
+          <summary>Container A/B/C/D protocol (~10 min)</summary>
+          <p style="margin:8px 0 0">Loop 2m→6m→2m→6m at each corner:</p>
+          <ul style="margin:6px 0 0 16px;padding:0">
+            <li><strong>A</strong> — stop 8–10s, no swing (×3 slow)</li>
+            <li><strong>B</strong> — stop, 1 pretend stroke, stand 5s (×3 slow)</li>
+            <li><strong>C</strong> — 2–3 practice swings, no hit (×2)</li>
+            <li><strong>D</strong> — short shuffle + soft taps (×2)</li>
+            <li><strong>A+B</strong> — repeat at vigorous walk (×3)</li>
+          </ul>
+          <p style="margin:8px 0 0">Same pocket every time. Keep the screen awake (app will try to hold it). Optional: tap recording screen to drop a marker.</p>
+        </details>
+        <div class="setting-row" style="margin-top:12px">
+          <div class="setting-text">
+            <strong>Show score bars in play</strong>
+            <span>GPS / motion / combined % on the play screen (debug).</span>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="setting-show-scores" onchange="onShowScoreHudToggle(this.checked)">
+            <span class="slider"></span>
+          </label>
+        </div>
+        <button type="button" class="btn-primary" style="width:100%;margin-top:12px" id="btn-start-calibration" onclick="startCalibrationSession()">Start calibration session</button>
+        <button type="button" class="btn-secondary" style="width:100%;margin-top:10px" onclick="openCalibrationHelp()">Export format &amp; tips</button>
+      </div>
+    </details>
+
+    <details class="card settings-acc" id="test-mode-card">
+      <summary class="settings-acc-summary">Test mode</summary>
+      <div class="settings-acc-body">
+        <p class="modal-note" style="margin-bottom:12px">
+          On-course checklist: features check off automatically as you use them. Progress stays on this device.
+        </p>
+        <div class="setting-row">
+          <div class="setting-text">
+            <strong>Track live tests</strong>
+            <span>Checklist + rising settle tone, GPS defer blips, and a play log for upload.</span>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="setting-test-mode" onchange="onTestModeToggle(this.checked)">
+            <span class="slider"></span>
+          </label>
+        </div>
+        <div class="setting-row">
+          <div class="setting-text">
+            <strong>Heartbeat chime (test only)</strong>
+            <span>Soft tick every ~40s while auto-mark is watching — confirms the app is awake.</span>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="setting-test-heartbeat" onchange="onTestHeartbeatToggle(this.checked)">
+            <span class="slider"></span>
+          </label>
+        </div>
+        <button type="button" class="btn-primary" style="width:100%;margin-top:8px" onclick="openTestChecklist()">Open checklist</button>
+        <button type="button" class="btn-secondary" style="width:100%;margin-top:10px" onclick="exportTestPlayLog()">Export test play log</button>
+        <button type="button" class="btn-secondary" style="width:100%;margin-top:10px" onclick="resetTestChecklist()">Reset checklist</button>
+      </div>
+    </details>
   </div>
 
   <!-- MODAL: Calibration export -->
@@ -1702,7 +1753,7 @@
   </div>
 
 <script>
-const APP_VERSION = "1.5.9";
+const APP_VERSION = "1.5.10";
 const PAGES_URL = "https://azzabazza11.github.io/golf-tracker/";
 const FEEDBACK_EMAIL = "aaron.callinan@gmail.com";
 const SUPPORT_URL = "https://ko-fi.com/aaroncallinan";
@@ -2667,7 +2718,10 @@ function onAboutSecretTap() {
   }
   renderSettings();
   const card = document.getElementById("test-mode-card");
-  if (card) card.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  if (card) {
+    card.open = true;
+    card.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
 }
 
 function onTestModeToggle(on) {
@@ -6363,7 +6417,24 @@ function bindMapGestures() {
 }
 
 // ---------- Settings + auto-mark + club edit ----------
+let settingsAccordionsBound = false;
+function bindSettingsAccordions() {
+  if (settingsAccordionsBound) return;
+  const screen = document.getElementById("screen-settings");
+  if (!screen) return;
+  settingsAccordionsBound = true;
+  // One section open at a time — keeps sliders off-screen while scrolling
+  screen.addEventListener("toggle", e => {
+    const t = e.target;
+    if (!(t instanceof HTMLDetailsElement) || !t.classList.contains("settings-acc") || !t.open) return;
+    screen.querySelectorAll("details.settings-acc[open]").forEach(d => {
+      if (d !== t) d.open = false;
+    });
+  }, true);
+}
+
 function renderSettings() {
+  bindSettingsAccordions();
   const light = document.getElementById("setting-light-mode");
   const pocket = document.getElementById("setting-pocket-lock");
   const am = document.getElementById("setting-auto-mark");
