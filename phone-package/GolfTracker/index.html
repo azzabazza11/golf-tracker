@@ -258,7 +258,7 @@
       position: fixed;
       top: max(18px, env(safe-area-inset-top, 0px));
       right: 14px;
-      z-index: 520;
+      z-index: 700;
       width: 54px;
       height: 54px;
       border-radius: 50%;
@@ -1259,6 +1259,17 @@
       </div>
       <div class="setting-row">
         <div class="setting-text">
+          <strong>Achievements ★</strong>
+          <span>Floating stars for drives, birdies, and personal bests. Tap the star to celebrate.</span>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="setting-achievements" onchange="onAchievementsToggle(this.checked)">
+          <span class="slider"></span>
+        </label>
+      </div>
+      <button type="button" class="btn-secondary" style="width:100%;margin-top:4px;margin-bottom:8px" onclick="openAchievementsModal()">View achievements</button>
+      <div class="setting-row">
+        <div class="setting-text">
           <strong>Green tap putts</strong>
           <span>Near the pin (on-green radius), hybrid pauses — short impulse taps ×3 mark a putt (not shakes).</span>
         </div>
@@ -1759,6 +1770,19 @@
     </div>
   </div>
 
+  <!-- MODAL: Achievements -->
+  <div id="modal-achievements" class="modal">
+    <div class="modal-content" style="max-height:90vh;overflow:auto">
+      <h3 style="margin-bottom:8px">Achievements ★</h3>
+      <p class="modal-note" id="achievements-summary" style="margin-bottom:10px"></p>
+      <div id="achievements-pending" style="display:none;margin-bottom:12px">
+        <button type="button" class="btn-primary" style="width:100%" onclick="openStarCelebrationFromSettings()">Show pending star</button>
+      </div>
+      <ul class="shot-list" id="achievements-list"></ul>
+      <button type="button" class="btn-secondary" style="width:100%;margin-top:14px" onclick="closeModal()">Close</button>
+    </div>
+  </div>
+
   <!-- MODAL: Green tap calibration -->
   <div id="modal-green-tap-calib" class="modal">
     <div class="modal-content" style="max-height:90vh;overflow:auto">
@@ -1809,7 +1833,7 @@
   </div>
 
 <script>
-const APP_VERSION = "1.5.24";
+const APP_VERSION = "1.5.25";
 const PAGES_URL = "https://azzabazza11.github.io/golf-tracker/";
 const FEEDBACK_EMAIL = "aaron.callinan@gmail.com";
 const SUPPORT_URL = "https://ko-fi.com/aaroncallinan";
@@ -1974,6 +1998,15 @@ function loadStorage(key, fallback) {
 
 let courses = loadStorage("gst_courses", []);
 let rounds  = loadStorage("gst_rounds", []);
+let achievementLog = loadStorage("gst_achievements", []);
+
+function saveAchievements() {
+  try {
+    localStorage.setItem("gst_achievements", JSON.stringify(achievementLog.slice(-80)));
+  } catch (e) {
+    console.warn("Could not save achievements", e);
+  }
+}
 
 function clampSens(key, val) {
   const r = SENSITIVITY_RANGES[key];
@@ -1996,6 +2029,7 @@ function loadSettings() {
       testUnlocked: !!s.testUnlocked,
       handsOff: !!s.handsOff,
       greenTapPutts: s.greenTapPutts !== false,
+      achievementsEnabled: s.achievementsEnabled !== false,
       voiceChimes: !!s.voiceChimes,
       showScoreHud: !!s.showScoreHud,
       testHeartbeat: !!s.testHeartbeat,
@@ -2017,6 +2051,7 @@ function loadSettings() {
       testUnlocked: false,
       handsOff: false,
       greenTapPutts: true,
+      achievementsEnabled: true,
       voiceChimes: false,
       showScoreHud: false,
       testHeartbeat: false,
@@ -2889,14 +2924,20 @@ let starQueue = [];
 let starSwipe = null;
 
 function enqueueStar(ach) {
+  if (!settings.achievementsEnabled) return;
   if (!ach || !ach.title) return;
   recordTestEvent("star_record");
-  starQueue.push({
+  const entry = {
     title: ach.title,
     headline: ach.headline || "",
     detail: ach.detail || "",
-    eyebrow: ach.eyebrow || "New record"
-  });
+    eyebrow: ach.eyebrow || "New record",
+    at: new Date().toISOString()
+  };
+  starQueue.push(entry);
+  achievementLog.push(entry);
+  if (achievementLog.length > 80) achievementLog = achievementLog.slice(-80);
+  saveAchievements();
   updateStarBadge();
 }
 
@@ -3014,18 +3055,18 @@ function bindStarBadgeGestures() {
     const dx = e.clientX - starSwipe.x0;
     const dy = e.clientY - starSwipe.y0;
     const dist = Math.hypot(dx, dy);
-    const moved = starSwipe.moved;
     starSwipe = null;
     badge.classList.remove("dragging");
     badge.style.transform = "";
     badge.style.opacity = "";
     try { badge.releasePointerCapture(e.pointerId); } catch (_) {}
 
+    // Swipe away to dismiss; any short press (incl. slight finger jitter) opens celebration
     if (dist > 72) {
       dismissStarBadgeOnly();
       return;
     }
-    if (!moved) openStarCelebration();
+    openStarCelebration();
   }
 
   badge.addEventListener("pointerup", endSwipe);
@@ -3034,6 +3075,11 @@ function bindStarBadgeGestures() {
     badge.classList.remove("dragging");
     badge.style.transform = "";
     badge.style.opacity = "";
+  });
+  // Fallback for environments that synthesize click without a clean pointerup
+  badge.addEventListener("click", e => {
+    e.preventDefault();
+    if (starQueue.length) openStarCelebration();
   });
 }
 
@@ -6882,6 +6928,7 @@ function renderSettings() {
   const snd = document.getElementById("setting-mark-sound");
   const hands = document.getElementById("setting-hands-off");
   const greenTap = document.getElementById("setting-green-tap");
+  const achievements = document.getElementById("setting-achievements");
   const voice = document.getElementById("setting-voice");
   if (light) light.checked = settings.theme === "light";
   if (pocket) pocket.checked = !!settings.pocketLockAuto;
@@ -6892,6 +6939,7 @@ function renderSettings() {
   }
   if (hands) hands.checked = !!settings.handsOff;
   if (greenTap) greenTap.checked = !!settings.greenTapPutts;
+  if (achievements) achievements.checked = !!settings.achievementsEnabled;
   if (voice) voice.checked = !!settings.voiceChimes;
   const showScores = document.getElementById("setting-show-scores");
   if (showScores) showScores.checked = !!settings.showScoreHud;
@@ -7336,6 +7384,47 @@ function onGreenTapToggle(on) {
     stopMotionDiagListener();
   }
   renderSettings();
+}
+
+function onAchievementsToggle(on) {
+  settings.achievementsEnabled = !!on;
+  saveSettings();
+  if (!on) clearStarQueue();
+  showToast(on ? "Achievements on" : "Achievements off");
+  renderSettings();
+}
+
+function openAchievementsModal() {
+  const sum = document.getElementById("achievements-summary");
+  const list = document.getElementById("achievements-list");
+  const pending = document.getElementById("achievements-pending");
+  if (sum) {
+    sum.textContent = settings.achievementsEnabled
+      ? `${achievementLog.length} saved · floating stars ${starQueue.length ? "pending — tap below or the ★" : "when you set a record"}`
+      : "Achievements are turned off — enable the toggle to earn stars again.";
+  }
+  if (pending) pending.style.display = starQueue.length ? "block" : "none";
+  if (list) {
+    if (!achievementLog.length) {
+      list.innerHTML = `<li style="color:var(--muted)">No achievements yet — play a round and beat a drive or score.</li>`;
+    } else {
+      const rows = [...achievementLog].reverse().slice(0, 40);
+      list.innerHTML = rows.map(a => {
+        const when = a.at ? new Date(a.at).toLocaleString() : "";
+        const head = `${escapeHtml(a.eyebrow || "Record")} · ${escapeHtml(a.title)}${a.headline ? " · " + escapeHtml(a.headline) : ""}`;
+        return `<li>
+          <span>${head}</span>
+          <strong style="font-weight:500;color:var(--muted);font-size:12px">${escapeHtml(when)}</strong>
+        </li>` + (a.detail ? `<li style="color:var(--muted);font-size:12px;padding-top:0">${escapeHtml(a.detail)}</li>` : "");
+      }).join("");
+    }
+  }
+  document.getElementById("modal-achievements")?.classList.add("active");
+}
+
+function openStarCelebrationFromSettings() {
+  document.getElementById("modal-achievements")?.classList.remove("active");
+  openStarCelebration();
 }
 
 function onVoiceToggle(on) {
