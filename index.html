@@ -1259,7 +1259,7 @@
     <details class="card settings-acc" id="sensitivity-card">
       <summary class="settings-acc-summary">Auto-mark sensitivity</summary>
       <div class="settings-acc-body">
-        <p class="modal-note" style="margin-bottom:8px">Motion stop peak + hold time arm the shot. A swing marks immediately at that spot; walking away only plays a confirm chime. On green with green-tap on, hybrid pauses.</p>
+        <p class="modal-note" style="margin-bottom:8px">Motion stop peak + hold time arm the shot. A swing marks immediately at that spot; walking away only plays a confirm chime. On green with green-tap on, hybrid pauses. On-green radius expands by GPS accuracy (so 3 m still works with ±GPS).</p>
         <div class="sens-presets" id="sens-presets">
           <button type="button" data-preset="strict" onclick="applySensPreset('strict')">Strict</button>
           <button type="button" data-preset="balanced" onclick="applySensPreset('balanced')">Balanced</button>
@@ -1753,7 +1753,7 @@
   </div>
 
 <script>
-const APP_VERSION = "1.5.21";
+const APP_VERSION = "1.5.22";
 const PAGES_URL = "https://azzabazza11.github.io/golf-tracker/";
 const FEEDBACK_EMAIL = "aaron.callinan@gmail.com";
 const SUPPORT_URL = "https://ko-fi.com/aaroncallinan";
@@ -1868,7 +1868,7 @@ const SENSITIVITY_RANGES = {
   teeNearM: { min: 2, max: 8, step: 0.5, label: "Tee near radius (m)" },
   teeLeaveM: { min: 4, max: 15, step: 1, label: "Tee leave radius (m)" },
   pinAcceptM: { min: 5, max: 20, step: 1, label: "Pin accept radius (m)" },
-  onGreenM: { min: 3, max: 25, step: 1, label: "On-green radius (m)" },
+  onGreenM: { min: 3, max: 25, step: 1, label: "On-green radius (m, +GPS accuracy)" },
   motionSensitivity: { min: 1, max: 10, step: 1, label: "Swing keenness (1 strict → 10 keen)" },
   motionStopPeak: { min: 8, max: 45, step: 1, label: "Stop when motion peak ≤" },
   motionStopS: { min: 1, max: 10, step: 0.5, label: "Stop hold time (s)" },
@@ -7429,13 +7429,20 @@ function metresFromMarkSpot() {
 }
 
 /** Green-tap zone with exit hysteresis (GPS flicker must not clear tap count). */
+function greenTapEnterM(pos) {
+  const base = sens("onGreenM");
+  const acc = pos && pos.accuracy != null ? Number(pos.accuracy) : 0;
+  // Expand by GPS uncertainty so a tight on-green setting still works (±5–15 m fixes)
+  return base + Math.min(Math.max(acc, 0), 10);
+}
+
 function inGreenTapZone() {
   if (!settings.greenTapPutts || !settings.autoMark || !currentRound || isTeeingOff) return false;
   const pin = getPin(currentHoleIndex);
   const pos = getBestMarkPosition() || currentPosition;
   if (!pin || !pos) return false;
   const d = haversine(pos.lat, pos.lon, pin.lat, pin.lon);
-  const enterM = sens("onGreenM");
+  const enterM = greenTapEnterM(pos);
   const leaveM = enterM + GREEN_TAP_EXIT_BUFFER_M;
   if (greenTapWasInZone) return d <= leaveM;
   return d <= enterM;
@@ -7640,7 +7647,7 @@ function pushTestLog(type, data) {
   // #endregion
   // Rate-limit hot types that previously blew the export to ~400KB
   // Rate-limit hot types that previously blew the export to ~400KB
-  if (type === "mark_deferred" || type === "walk_audio_confirm" || type === "auto_tee_wait") {
+  if (type === "mark_deferred" || type === "walk_audio_confirm" || type === "auto_tee_wait" || type === "green_outside") {
     const key = "_last_" + type;
     if (pushTestLog[key] && _now - pushTestLog[key] < 2000) return;
     pushTestLog[key] = _now;
@@ -8215,6 +8222,21 @@ function onDeviceMotion(ev) {
     if (!greenTapWasInZone) {
       greenTapTimes = [];
       greenTapBumpCount = 0;
+    }
+    // Throttled: help diagnose "I was on the green but taps didn't count"
+    const pin = getPin(currentHoleIndex);
+    const pos = getBestMarkPosition() || currentPosition;
+    if (pin && pos) {
+      const dPin = haversine(pos.lat, pos.lon, pin.lat, pin.lon);
+      const enterM = greenTapEnterM(pos);
+      if (dPin <= enterM + 25) {
+        pushTestLog("green_outside", {
+          dPin: Math.round(dPin * 10) / 10,
+          enterM: Math.round(enterM * 10) / 10,
+          onGreenM: sens("onGreenM"),
+          accuracy: pos.accuracy != null ? Math.round(pos.accuracy * 10) / 10 : null
+        });
+      }
     }
     return;
   }
