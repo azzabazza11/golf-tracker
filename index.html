@@ -191,6 +191,65 @@
       border-radius: 10px;
     }
     .club-btn.selected { background: var(--accent); color: #000; }
+    .club-btn.suggested {
+      background: transparent;
+      color: var(--accent);
+      box-shadow: inset 0 0 0 1.5px var(--accent);
+    }
+    .club-btn.suggested.selected {
+      background: rgba(46, 204, 113, 0.22);
+      color: var(--accent);
+      box-shadow: inset 0 0 0 2px var(--accent);
+    }
+    .status.suggested { color: var(--accent); opacity: 0.92; font-style: italic; }
+
+    .coach-tip {
+      position: fixed;
+      inset: 0;
+      z-index: 240;
+      display: none;
+      pointer-events: none;
+    }
+    .coach-tip.show { display: block; pointer-events: auto; }
+    .coach-tip-scrim {
+      position: absolute;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.35);
+    }
+    [data-theme="light"] .coach-tip-scrim { background: rgba(15, 20, 25, 0.28); }
+    .coach-tip-card {
+      position: absolute;
+      left: 16px;
+      right: 16px;
+      bottom: max(24px, env(safe-area-inset-bottom));
+      background: var(--card);
+      border-radius: 16px;
+      padding: 16px 18px 14px;
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+    .coach-tip-title {
+      font-size: 16px;
+      font-weight: 700;
+      margin-bottom: 6px;
+    }
+    .coach-tip-body {
+      font-size: 14px;
+      color: var(--muted);
+      line-height: 1.45;
+      margin-bottom: 12px;
+    }
+    .coach-highlight {
+      position: relative;
+      z-index: 241;
+      box-shadow: 0 0 0 3px rgba(46, 204, 113, 0.55), 0 0 24px rgba(46, 204, 113, 0.25);
+      border-radius: 12px;
+      animation: coach-pulse 1.6s ease-in-out infinite;
+    }
+    @keyframes coach-pulse {
+      0%, 100% { box-shadow: 0 0 0 3px rgba(46, 204, 113, 0.45), 0 0 16px rgba(46, 204, 113, 0.15); }
+      50% { box-shadow: 0 0 0 5px rgba(46, 204, 113, 0.7), 0 0 28px rgba(46, 204, 113, 0.3); }
+    }
 
     .status {
       font-size: 13px;
@@ -1270,6 +1329,18 @@
       <button type="button" class="btn-secondary" style="width:100%;margin-top:4px;margin-bottom:8px" onclick="openAchievementsModal()">View achievements</button>
       <div class="setting-row">
         <div class="setting-text">
+          <strong>Beginner tips</strong>
+          <span>Occasional one-time hints (map zones, green tap). Default on. Tap to dismiss.</span>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="setting-coach-tips" onchange="onCoachTipsToggle(this.checked)">
+          <span class="slider"></span>
+        </label>
+      </div>
+      <button type="button" class="btn-secondary" style="width:100%;margin-top:4px;margin-bottom:8px" onclick="openHelpModal()">Help guide</button>
+      <button type="button" class="btn-secondary" style="width:100%;margin-top:0;margin-bottom:8px" onclick="resetCoachTips()">Reset tips</button>
+      <div class="setting-row">
+        <div class="setting-text">
           <strong>Green tap putts</strong>
           <span>Near the pin (on-green radius), hybrid pauses — short impulse taps ×3 mark a putt (not shakes).</span>
         </div>
@@ -1685,9 +1756,35 @@
   <!-- MODAL: Hole Picker -->
   <div id="modal-holes" class="modal">
     <div class="modal-content">
-      <h3 style="margin-bottom:12px">Jump to Hole</h3>
+      <h3 style="margin-bottom:8px">Jump to Hole</h3>
+      <p class="modal-note" style="margin-bottom:12px">Tap a hole to jump. Long-press to rename (optional custom name).</p>
       <div class="hole-pills" id="hole-pills"></div>
       <button class="btn-secondary" style="width:100%;margin-top:16px" onclick="closeModal()">Close</button>
+    </div>
+  </div>
+
+  <!-- MODAL: Help guide -->
+  <div id="modal-help" class="modal" onclick="if(event.target===this)closeModal()">
+    <div class="modal-content" onclick="event.stopPropagation()" style="max-height:85vh;overflow:auto">
+      <h3 style="margin-bottom:10px">Help</h3>
+      <p class="modal-note"><strong>Fairway auto-mark</strong> — Stand still until armed, then your swing marks at that GPS spot. Walking away only plays a confirm chime (it does not wait to mark).</p>
+      <p class="modal-note"><strong>Min shot move</strong> — Swings too close to the last mark are ignored (practice swings).</p>
+      <p class="modal-note"><strong>On the green</strong> — Near the pin, hybrid pauses. Three short phone taps mark a putt (not shakes). Calibrate taps in Settings. Once locked, the zone stays sticky past a GPS bump or a short roll off the green.</p>
+      <p class="modal-note"><strong>Next tee</strong> — After hole-out, walk to the next tee (solid white circle), stop, then auto-tee. Don’t expect tee-off on the previous green.</p>
+      <p class="modal-note"><strong>Map circles</strong> — Tee: solid = near-tee; dashed = leave buffer. Green: solid = enter / lock green-tap; dashed = sticky leave (~150% of enter).</p>
+      <p class="modal-note"><strong>Club suggest</strong> — If you haven’t picked a club, the app suggests your usual club for that hole/shot when known, otherwise a club for the distance to the pin. Highlighted = autofill — tap to change.</p>
+      <p class="modal-note"><strong>Hole names</strong> — Optional: long-press a hole in the hole picker to set a custom name (default is Hole N).</p>
+      <p class="modal-note"><strong>Pocket lock</strong> — Idle lock in shot mode; swipe to unlock.</p>
+      <button type="button" class="btn-primary" style="width:100%;margin-top:8px" onclick="closeModal()">Close</button>
+    </div>
+  </div>
+
+  <div id="coach-tip" class="coach-tip" aria-live="polite">
+    <div class="coach-tip-scrim" onclick="dismissCoachTip()"></div>
+    <div class="coach-tip-card" onclick="event.stopPropagation()">
+      <div class="coach-tip-title" id="coach-tip-title"></div>
+      <div class="coach-tip-body" id="coach-tip-body"></div>
+      <button type="button" class="btn-primary" style="width:100%" onclick="dismissCoachTip()">Got it</button>
     </div>
   </div>
 
@@ -1833,7 +1930,7 @@
   </div>
 
 <script>
-const APP_VERSION = "1.5.26";
+const APP_VERSION = "1.5.27";
 const PAGES_URL = "https://azzabazza11.github.io/golf-tracker/";
 const FEEDBACK_EMAIL = "aaron.callinan@gmail.com";
 const SUPPORT_URL = "https://ko-fi.com/aaroncallinan";
@@ -1983,7 +2080,7 @@ const SENSITIVITY_RANGES = {
   markConfirmMoveM: { min: 1, max: 8, step: 0.5, label: "Walk-away confirm chime (m)" },
   greenTapDelta: { min: 1, max: 8, step: 0.1, label: "Tap: above baseline +" },
   greenTapFloor: { min: 2, max: 15, step: 0.5, label: "Tap: min magnitude" },
-  greenTapImpulseMs: { min: 60, max: 400, step: 10, label: "Tap: max impulse (ms)" },
+  greenTapImpulseMs: { min: 20, max: 400, step: 5, label: "Tap: max impulse (ms)" },
   greenTapRefractoryMs: { min: 200, max: 1200, step: 50, label: "Tap: gap between counts (ms)" },
   greenTapWindowMs: { min: 1200, max: 5000, step: 100, label: "Tap: window for 3 counts (ms)" }
 };
@@ -2036,6 +2133,8 @@ function loadSettings() {
       handsOff: !!s.handsOff,
       greenTapPutts: s.greenTapPutts !== false,
       achievementsEnabled: s.achievementsEnabled !== false,
+      coachTips: s.coachTips !== false,
+      coachTipsSeen: (s.coachTipsSeen && typeof s.coachTipsSeen === "object") ? s.coachTipsSeen : {},
       voiceChimes: !!s.voiceChimes,
       showScoreHud: !!s.showScoreHud,
       testHeartbeat: !!s.testHeartbeat,
@@ -2058,6 +2157,8 @@ function loadSettings() {
       handsOff: false,
       greenTapPutts: true,
       achievementsEnabled: true,
+      coachTips: true,
+      coachTipsSeen: {},
       voiceChimes: false,
       showScoreHud: false,
       testHeartbeat: false,
@@ -2109,6 +2210,8 @@ let pendingDistance = 0;
 let pendingShotPosition = null;  // GPS snapshot at Mark Shot
 let selectedClub = null;
 let clubForCurrentShot = null;
+let clubForCurrentShotAuto = false; // true = caddy/typical autofill (player can override)
+let clubSuggestSource = null; // "typical" | "range" | null
 let isTeeingOff = true;
 let mockGpsActive = false;
 let mockMoveStep = 0;
@@ -3446,7 +3549,27 @@ function ensureCourseHole(index, course) {
   if (!h.mapView) h.mapView = { ...DEFAULT_MAP_VIEW };
   if (h.mapLocked == null) h.mapLocked = false;
   if (h.photoCalib === undefined) h.photoCalib = null;
+  if (h.name === undefined) h.name = null;
   return h;
+}
+
+/** Display name for a hole — custom course name or "Hole N". */
+function holeDisplayName(holeIndex, course, roundHole) {
+  const idx = holeIndex == null ? currentHoleIndex : holeIndex;
+  const c = course || currentCourse;
+  const ch = c && c.holes && c.holes[idx];
+  const num = (roundHole && roundHole.holeNumber) || (ch && ch.holeNumber) || (idx + 1);
+  const custom = ch && ch.name && String(ch.name).trim();
+  return custom || ("Hole " + num);
+}
+
+function setHoleCustomName(holeIndex, name) {
+  const ch = ensureCourseHole(holeIndex);
+  if (!ch) return false;
+  const trimmed = (name == null ? "" : String(name)).trim();
+  ch.name = trimmed || null;
+  saveData();
+  return true;
 }
 
 function getPin(index) {
@@ -3904,9 +4027,9 @@ function startRound(courseId, opts) {
   isTeeingOff = true;
   selectedClub = null;
   clubForCurrentShot = null;
+  clubForCurrentShotAuto = false;
+  clubSuggestSource = null;
   pendingShotPosition = null;
-  mockMoveStep = 0;
-  beginTeeChimedHole = null;
   resetTeeHandoffState();
   lastNearPinPos = null;
   lastPosBeforeNextTee = null;
@@ -3965,27 +4088,113 @@ function typicalClubForHole(courseId, holeIndex, shotNumber) {
   return best;
 }
 
+/** Stock carry distances (m) for range caddy — amateur-ish defaults. */
+const CLUB_CARRY_M = {
+  Dr: 220, "3w": 200, "5w": 185, Hybrid: 175,
+  "3i": 170, "4i": 160, "5i": 150, "6i": 140, "7i": 130, "8i": 120, "9i": 110,
+  PW: 95, GW: 80, SW: 65, LW: 50, Putter: 12
+};
+
+function suggestClubForDistance(distM) {
+  if (distM == null || !Number.isFinite(distM)) return null;
+  const d = Math.max(0, distM);
+  if (d <= Math.max(18, sens("onGreenM") * 1.15)) return "Putter";
+  let best = null;
+  let bestOver = Infinity;
+  let bestShort = null;
+  let bestShortGap = Infinity;
+  CLUBS.forEach(c => {
+    const carry = CLUB_CARRY_M[c];
+    if (carry == null || c === "Putter") return;
+    if (carry >= d) {
+      const over = carry - d;
+      if (over < bestOver) {
+        bestOver = over;
+        best = c;
+      }
+    } else {
+      const gap = d - carry;
+      if (gap < bestShortGap) {
+        bestShortGap = gap;
+        bestShort = c;
+      }
+    }
+  });
+  return best || bestShort || "7i";
+}
+
+/** Typical hole/shot club if known, else range-to-pin caddy. */
+function resolveSuggestedClub(shotNumber) {
+  if (!currentRound) return { club: null, source: null, guess: false, distM: null };
+  const sn = Math.max(1, shotNumber || 1);
+  const typical = typicalClubForHole(currentRound.courseId, currentHoleIndex, sn);
+  if (typical) return { club: typical, source: "typical", guess: true, distM: null };
+  const pos = getBestMarkPosition() || currentPosition;
+  const distM = distanceToPin(pos);
+  if (distM == null) return { club: null, source: null, guess: false, distM: null };
+  const club = suggestClubForDistance(distM);
+  return { club, source: "range", guess: !!club, distM };
+}
+
 function resolveAutoShotClub(shotNumber) {
   if (!currentRound) {
-    return { club: null, clubGuess: false, shotLabel: "Shot taken" };
+    return { club: null, clubGuess: false, shotLabel: "Shot taken", clubSuggest: null };
   }
-  const typical = typicalClubForHole(currentRound.courseId, currentHoleIndex, shotNumber);
-  if (typical) return { club: typical, clubGuess: true, shotLabel: null };
-  if (shotNumber === 1) return { club: null, clubGuess: false, shotLabel: "Tee shot" };
-  return { club: null, clubGuess: false, shotLabel: "Walking to ball" };
+  if (clubForCurrentShot && !clubForCurrentShotAuto) {
+    return { club: clubForCurrentShot, clubGuess: false, shotLabel: null, clubSuggest: null };
+  }
+  if (clubForCurrentShot && clubForCurrentShotAuto) {
+    return {
+      club: clubForCurrentShot,
+      clubGuess: true,
+      shotLabel: null,
+      clubSuggest: clubSuggestSource || "typical"
+    };
+  }
+  const sug = resolveSuggestedClub(shotNumber);
+  if (sug.club) {
+    return {
+      club: sug.club,
+      clubGuess: true,
+      shotLabel: null,
+      clubSuggest: sug.source
+    };
+  }
+  if (shotNumber === 1) return { club: null, clubGuess: false, shotLabel: "Tee shot", clubSuggest: null };
+  return { club: null, clubGuess: false, shotLabel: "Walking to ball", clubSuggest: null };
+}
+
+function refreshClubSuggestion(opts) {
+  opts = opts || {};
+  if (!currentRound || isTeeingOff) return;
+  if (clubForCurrentShot && !clubForCurrentShotAuto && !opts.force) return;
+  const hole = currentRound.holes[currentHoleIndex];
+  const nextN = (hole.shots.length || 0) + 1;
+  const sug = resolveSuggestedClub(nextN);
+  clubForCurrentShot = sug.club || null;
+  clubForCurrentShotAuto = !!sug.club;
+  clubSuggestSource = sug.club ? sug.source : null;
+  if (sug.source === "range" && sug.club) maybeShowCoachTip("caddy_club");
 }
 
 function shotClubDisplayHtml(s) {
   if (s.club) {
-    const guess = s.clubGuess ? ' <span class="club-missing">(typical)</span>' : "";
-    return escapeHtml(s.club) + guess;
+    let tag = "";
+    if (s.clubGuess) {
+      const kind = s.clubSuggest === "range" ? "suggested" : "typical";
+      tag = ` <span class="club-missing">(${kind})</span>`;
+    }
+    return escapeHtml(s.club) + tag;
   }
   if (s.shotLabel) return `<span class="club-missing">${escapeHtml(s.shotLabel)}</span>`;
   return `<span class="club-missing">${s.auto ? "auto · tap club" : "tap club"}</span>`;
 }
 
 function shotClubPlain(s) {
-  if (s.club) return s.club + (s.clubGuess ? " (typical)" : "");
+  if (s.club) {
+    if (!s.clubGuess) return s.club;
+    return s.club + (s.clubSuggest === "range" ? " (suggested)" : " (typical)");
+  }
   if (s.shotLabel) return s.shotLabel;
   return s.auto ? "auto" : "—";
 }
@@ -4162,9 +4371,10 @@ function updateWaitingTeeHint(nearest) {
   const distBit = nearest && Number.isFinite(nearest.dist)
     ? ` · ${Math.round(nearest.dist)} m to tee`
     : "";
+  const label = holeDisplayName(currentHoleIndex, currentCourse, hole);
   clubEl.textContent = typical
-    ? `Hole ${hole.holeNumber}${distBit} · typical ${typical}`
-    : `Hole ${hole.holeNumber}${distBit} · waiting to begin`;
+    ? `${label}${distBit} · typical ${typical}`
+    : `${label}${distBit} · waiting to begin`;
 }
 
 function courseCentroid(course) {
@@ -4253,7 +4463,7 @@ function endFlexibleRoundEarly() {
 function updatePlayUI() {
   const hole = currentRound.holes[currentHoleIndex];
   document.getElementById("play-hole-info").textContent =
-    `Hole ${hole.holeNumber} · Par ${hole.par}`;
+    `${holeDisplayName(currentHoleIndex, currentCourse, hole)} · Par ${hole.par}`;
 
   const list = document.getElementById("hole-shots");
   if (hole.shots.length === 0) {
@@ -4312,24 +4522,34 @@ function updatePlayUI() {
   const clubEl = document.getElementById("current-club-display");
   if (clubEl) {
     if (isTeeingOff && currentRound && currentRound.mode === "handsOff" && roundAwaitingFirstTee()) {
+      clubEl.classList.remove("suggested");
       const nearest = currentPosition && currentCourse
         ? findNearestTeeIndex(currentCourse, currentPosition)
         : null;
       updateWaitingTeeHint(nearest || { dist: null });
     } else if (isTeeingOff && currentRound && currentRound.mode === "handsOff") {
+      clubEl.classList.remove("suggested");
       updateWaitingNextTeeHint(metresToCurrentHoleTee(), nearCurrentHoleTee() ? teeAutoReadyState() : null);
     } else if (isTeeingOff) {
+      clubEl.classList.remove("suggested");
       clubEl.textContent = "";
-    } else if (clubForCurrentShot) {
-      clubEl.textContent = "Selected club: " + clubForCurrentShot;
-    } else if (settings.autoMark) {
-      const nextN = (hole.shots.length || 0) + 1;
-      const typical = typicalClubForHole(currentRound.courseId, currentHoleIndex, nextN);
-      clubEl.textContent = typical
-        ? `Typical next: ${typical} · auto-mark watching`
-        : "Auto-mark watching · club after shot";
     } else {
-      clubEl.textContent = "";
+      if (!(clubForCurrentShot && !clubForCurrentShotAuto)) refreshClubSuggestion();
+      if (clubForCurrentShot) {
+        clubEl.classList.toggle("suggested", !!clubForCurrentShotAuto);
+        const dPin = metresToPin();
+        if (clubForCurrentShotAuto) {
+          const src = clubSuggestSource === "typical" ? "Typical" : "Suggested";
+          const distBit = (clubSuggestSource === "range" && dPin != null) ? ` · ${Math.round(dPin)} m` : "";
+          const watch = settings.autoMark ? " · auto-mark watching" : "";
+          clubEl.textContent = `${src}: ${clubForCurrentShot}${distBit}${watch}`;
+        } else {
+          clubEl.textContent = "Selected club: " + clubForCurrentShot;
+        }
+      } else {
+        clubEl.classList.remove("suggested");
+        clubEl.textContent = settings.autoMark ? "Auto-mark watching · club after shot" : "";
+      }
     }
   }
 
@@ -4364,11 +4584,14 @@ function updatePlayUI() {
   updateLiveDistance();
 }
 
-function renderClubGrid(containerId, preselect) {
+function renderClubGrid(containerId, preselect, opts) {
+  opts = opts || {};
   const grid = document.getElementById(containerId);
+  const suggested = !!opts.suggested;
   grid.innerHTML = CLUBS.map(c => {
-    const sel = preselect === c ? " selected" : "";
-    return `<button type="button" class="club-btn${sel}" onclick="selectClub(this,'${c}')">${c}</button>`;
+    let cls = "club-btn";
+    if (preselect === c) cls += suggested ? " selected suggested" : " selected";
+    return `<button type="button" class="${cls}" onclick="selectClub(this,'${c}')">${c}</button>`;
   }).join("");
   selectedClub = preselect || null;
 }
@@ -4400,7 +4623,12 @@ function mainAction() {
 }
 
 function openTeeModal() {
-  renderClubGrid("tee-club-grid", null);
+  const typical = currentRound
+    ? typicalClubForHole(currentRound.courseId, currentHoleIndex, 1)
+    : null;
+  const d = distanceToPin(currentPosition);
+  const sug = typical || suggestClubForDistance(d);
+  renderClubGrid("tee-club-grid", sug, { suggested: !!sug });
   updateToHoleDisplay("tee-to-hole", currentPosition);
   document.getElementById("modal-tee").classList.add("active");
 }
@@ -4426,6 +4654,8 @@ function confirmTeeOff() {
   };
   anchorPosition = { lat: markPos.lat, lon: markPos.lon };
   clubForCurrentShot = selectedClub;
+  clubForCurrentShotAuto = false;
+  clubSuggestSource = null;
   hole.nextClub = selectedClub;
   isTeeingOff = false;
   selectedClub = null;
@@ -4440,10 +4670,16 @@ function confirmTeeOff() {
 }
 
 function openConfirmModal(dist) {
-  document.getElementById("confirm-club-used").textContent = clubForCurrentShot || "—";
+  const usedLabel = clubForCurrentShot
+    ? (clubForCurrentShotAuto
+      ? `${clubForCurrentShot} (${clubSuggestSource === "range" ? "suggested" : "typical"})`
+      : clubForCurrentShot)
+    : "—";
+  document.getElementById("confirm-club-used").textContent = usedLabel;
   document.getElementById("confirm-distance").textContent = Math.round(dist) + " m";
   document.getElementById("adjust-distance").value = Math.round(dist);
-  renderClubGrid("club-grid", null);
+  const nextSug = resolveSuggestedClub((currentRound.holes[currentHoleIndex].shots.length || 0) + 2);
+  renderClubGrid("club-grid", nextSug.club, { suggested: !!nextSug.club });
   updateToHoleDisplay("confirm-to-hole", pendingShotPosition);
   const note = document.querySelector("#modal-confirm .modal-note");
   if (note) {
@@ -4463,9 +4699,20 @@ function openConfirmModal(dist) {
 }
 
 function selectClub(el, club) {
-  document.querySelectorAll(".club-btn").forEach(b => b.classList.remove("selected"));
+  document.querySelectorAll(".club-btn").forEach(b => {
+    b.classList.remove("selected", "suggested");
+  });
   el.classList.add("selected");
   selectedClub = club;
+  // Firm player pick when choosing upcoming club on play / confirm flows
+  if (document.getElementById("modal-confirm")?.classList.contains("active") ||
+      document.getElementById("modal-tee")?.classList.contains("active")) {
+    /* selectedClub only until confirm */
+  } else {
+    clubForCurrentShot = club;
+    clubForCurrentShotAuto = false;
+    clubSuggestSource = null;
+  }
 }
 
 function confirmShot() {
@@ -4493,6 +4740,8 @@ function confirmShot() {
     number: shotNum,
     distance: adjusted,
     club: clubForCurrentShot || null,
+    clubGuess: !!(clubForCurrentShot && clubForCurrentShotAuto),
+    clubSuggest: clubForCurrentShotAuto ? clubSuggestSource : null,
     from,
     to,
     auto: false
@@ -4503,7 +4752,14 @@ function confirmShot() {
   noteMarkEvent();
   anchorPosition = { lat: to.lat, lon: to.lon };
   clubForCurrentShot = selectedClub || null;
-  hole.nextClub = selectedClub || null;
+  clubForCurrentShotAuto = false;
+  clubSuggestSource = null;
+  if (!clubForCurrentShot) refreshClubSuggestion({ force: true });
+  else {
+    clubForCurrentShotAuto = false;
+    clubSuggestSource = null;
+  }
+  hole.nextClub = clubForCurrentShot || null;
   pendingShotPosition = null;
   selectedClub = null;
   closeModal();
@@ -4524,6 +4780,8 @@ function advanceAfterHoleOut(opts) {
     isTeeingOff = true;
     anchorPosition = null;
     clubForCurrentShot = null;
+    clubForCurrentShotAuto = false;
+    clubSuggestSource = null;
     pendingShotPosition = null;
     mockMoveStep = 0;
     updatePlayUI();
@@ -5006,9 +5264,47 @@ function showHolePicker() {
     let cls = "hole-pill";
     if (i === currentHoleIndex) cls += " active";
     else if (h.shots.length > 0) cls += " done";
-    return `<div class="${cls}" onclick="jumpToHole(${i})">${h.holeNumber}</div>`;
+    const label = holeDisplayName(i, currentCourse, h);
+    const short = label.length > 10 ? ("H" + h.holeNumber) : label.replace(/^Hole\s+/i, "H");
+    return `<div class="${cls}" data-hole-index="${i}" title="${escapeHtml(label)}">${escapeHtml(short)}</div>`;
   }).join("");
+  pills.querySelectorAll(".hole-pill").forEach(el => {
+    let timer = null;
+    let longPressed = false;
+    const idx = parseInt(el.dataset.holeIndex, 10);
+    el.addEventListener("pointerdown", () => {
+      longPressed = false;
+      timer = setTimeout(() => {
+        timer = null;
+        longPressed = true;
+        renameHoleFromPicker(idx);
+      }, 550);
+    });
+    const clear = () => { if (timer) { clearTimeout(timer); timer = null; } };
+    el.addEventListener("pointerup", (ev) => {
+      clear();
+      if (!longPressed) jumpToHole(idx);
+    });
+    el.addEventListener("pointerleave", clear);
+    el.addEventListener("pointercancel", clear);
+  });
   document.getElementById("modal-holes").classList.add("active");
+}
+
+function renameHoleFromPicker(index) {
+  if (!currentCourse || !currentRound) return;
+  const ch = ensureCourseHole(index);
+  const hole = currentRound.holes[index];
+  const current = (ch && ch.name) || "";
+  const next = prompt(
+    `Name for hole ${hole.holeNumber} (leave blank for “Hole ${hole.holeNumber}”)`,
+    current
+  );
+  if (next == null) return;
+  setHoleCustomName(index, next);
+  showHolePicker();
+  updatePlayUI();
+  showToast(holeDisplayName(index, currentCourse, hole));
 }
 
 function jumpToHole(index) {
@@ -5117,7 +5413,7 @@ function reviewRound(id, opts) {
     html += `<div class="card" data-review-chrome="1">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:8px">
         <div class="review-hole-title" style="font-weight:600;flex:1" onclick="openHoleHistory('${courseId}',${i},'${round.id}')">
-          Hole ${h.holeNumber} (Par ${h.par}) · ${h.shots.length} shot${h.shots.length === 1 ? "" : "s"}
+          ${escapeHtml(holeDisplayName(i, courses.find(c => c.id === courseId), h))} (Par ${h.par}) · ${h.shots.length} shot${h.shots.length === 1 ? "" : "s"}
           <div style="font-size:12px;color:var(--muted);font-weight:400;margin-top:2px">Tap for hole history</div>
         </div>
         ${canMap ? `<button class="btn-secondary" style="padding:8px 12px;font-size:13px" onclick="event.stopPropagation();openHoleMapFromReview('${round.id}',${i})">Map</button>` : ""}
@@ -5206,7 +5502,7 @@ function openHoleHistory(courseId, holeIndex, highlightRoundId) {
   const holeNum = holeIndex + 1;
   const par = course.holes[holeIndex].par;
   document.getElementById("hole-history-title").textContent =
-    `Hole ${holeNum} · Par ${par}`;
+    `${holeDisplayName(holeIndex, course, { holeNumber: holeNum })} · Par ${par}`;
 
   const scores = [];
   roundsForCourse(courseId).forEach(r => {
@@ -5305,6 +5601,8 @@ function resumePartialRound(roundId) {
     isTeeingOff = true;
     anchorPosition = null;
     clubForCurrentShot = null;
+    clubForCurrentShotAuto = false;
+    clubSuggestSource = null;
   } else if (hole.shots.length) {
     currentHoleIndex = idx;
     isTeeingOff = false;
@@ -5313,16 +5611,22 @@ function resumePartialRound(roundId) {
       ? { lat: last.to.lat, lon: last.to.lon }
       : (hole.teePosition ? { lat: hole.teePosition.lat, lon: hole.teePosition.lon } : null);
     clubForCurrentShot = hole.nextClub || null;
+    clubForCurrentShotAuto = !!clubForCurrentShot;
+    clubSuggestSource = clubForCurrentShot ? "typical" : null;
   } else if (hole.teePosition) {
     currentHoleIndex = idx;
     isTeeingOff = false;
     anchorPosition = { lat: hole.teePosition.lat, lon: hole.teePosition.lon };
     clubForCurrentShot = hole.teePosition.club || hole.nextClub || null;
+    clubForCurrentShotAuto = !!clubForCurrentShot;
+    clubSuggestSource = clubForCurrentShot ? "typical" : null;
   } else {
     currentHoleIndex = idx;
     isTeeingOff = true;
     anchorPosition = null;
     clubForCurrentShot = null;
+    clubForCurrentShotAuto = false;
+    clubSuggestSource = null;
   }
 
   pendingShotPosition = null;
@@ -5602,13 +5906,14 @@ async function openMapSession(session) {
   pendingMapImageFile = null;
   ensureCourseHole(session.holeIndex, session.course);
   document.getElementById("map-title").textContent =
-    `Hole ${session.roundHole.holeNumber} Map`;
+    `${holeDisplayName(session.holeIndex, session.course, session.roundHole)} Map`;
   document.getElementById("modal-map").classList.add("active");
   bindMapGestures();
   bindMapTeePinLongPress();
   updateMapLockUI();
   updateMapHoleNavButtons();
   updateMapWalkTrackButton();
+  maybeShowCoachTip("map_zones", "#map-canvas, #modal-map .modal-content");
   await ensureCourseDefaultPhoto(session.courseId, session.course.holes.length);
   await loadMapImageForSession();
   applyMapHoleFraming({ animate: false });
@@ -5669,7 +5974,7 @@ async function mapStepHole(delta) {
   mapDragShot = null;
   mapHitShots = [];
   document.getElementById("map-title").textContent =
-    `Hole ${mapSession.roundHole.holeNumber} Map`;
+    `${holeDisplayName(mapSession.holeIndex, mapSession.course, mapSession.roundHole)} Map`;
   ensureCourseHole(next, mapSession.course);
   updateMapHoleNavButtons();
   await loadMapImageForSession();
@@ -6949,6 +7254,8 @@ function renderSettings() {
   if (hands) hands.checked = !!settings.handsOff;
   if (greenTap) greenTap.checked = !!settings.greenTapPutts;
   if (achievements) achievements.checked = !!settings.achievementsEnabled;
+  const coachTips = document.getElementById("setting-coach-tips");
+  if (coachTips) coachTips.checked = settings.coachTips !== false;
   if (voice) voice.checked = !!settings.voiceChimes;
   const showScores = document.getElementById("setting-show-scores");
   if (showScores) showScores.checked = !!settings.showScoreHud;
@@ -7208,16 +7515,20 @@ function updatePocketLockInfo() {
   const sub = document.getElementById("pocket-lock-hole");
   if (sub && hole) {
     sub.textContent = settings.autoMark
-      ? `Hole ${hole.holeNumber}`
-      : `Hole ${hole.holeNumber} · swipe when ready to mark`;
+      ? holeDisplayName(currentHoleIndex, currentCourse, hole)
+      : `${holeDisplayName(currentHoleIndex, currentCourse, hole)} · swipe when ready to mark`;
   }
   const clubEl = document.getElementById("pocket-lock-club");
   if (clubEl) {
-    if (clubForCurrentShot) clubEl.textContent = "Selected club: " + clubForCurrentShot;
-    else if (settings.autoMark && hole) {
-      const nextN = (hole.shots.length || 0) + 1;
-      const typical = typicalClubForHole(currentRound.courseId, currentHoleIndex, nextN);
-      clubEl.textContent = typical ? ("Typical next: " + typical) : "";
+    if (clubForCurrentShot) {
+      clubEl.textContent = clubForCurrentShotAuto
+        ? `${clubSuggestSource === "typical" ? "Typical" : "Suggested"}: ${clubForCurrentShot}`
+        : "Selected club: " + clubForCurrentShot;
+    } else if (settings.autoMark && hole) {
+      refreshClubSuggestion();
+      clubEl.textContent = clubForCurrentShot
+        ? `${clubSuggestSource === "typical" ? "Typical" : "Suggested"}: ${clubForCurrentShot}`
+        : "";
     } else {
       clubEl.textContent = "";
     }
@@ -7403,6 +7714,84 @@ function onAchievementsToggle(on) {
   if (!on) clearStarQueue();
   showToast(on ? "Achievements on" : "Achievements off");
   renderSettings();
+}
+
+function onCoachTipsToggle(on) {
+  settings.coachTips = !!on;
+  saveSettings();
+  if (!on) dismissCoachTip(true);
+  renderSettings();
+  showToast(on ? "Beginner tips on" : "Beginner tips off");
+}
+
+function openHelpModal() {
+  document.getElementById("modal-help")?.classList.add("active");
+}
+
+function resetCoachTips() {
+  settings.coachTipsSeen = {};
+  saveSettings();
+  showToast("Tips reset — they’ll show again when relevant");
+}
+
+const COACH_TIPS = {
+  map_zones: {
+    title: "Map zones",
+    body: "Solid circles are enter/active zones. Dashed rings are leave buffers so GPS jitter doesn’t flip tee or green-tap state. Green dashed ≈ 150% of the solid green radius."
+  },
+  green_tap: {
+    title: "Green tap putts",
+    body: "Hybrid auto-mark pauses on the green. Three short taps on the phone mark a putt (not shakes). Calibrate in Settings if taps feel too hard or soft."
+  },
+  caddy_club: {
+    title: "Suggested club",
+    body: "When you haven’t picked a club, the app suggests one from distance to the pin (or your usual club for that hole/shot). Highlighted = autofill — tap another club to change."
+  }
+};
+
+let coachTipActiveId = null;
+let coachTipAnchorEls = [];
+
+function maybeShowCoachTip(id, anchorSel) {
+  if (!settings.coachTips) return;
+  if (!COACH_TIPS[id]) return;
+  if (settings.coachTipsSeen && settings.coachTipsSeen[id]) return;
+  if (coachTipActiveId) return;
+  if (greenTapCalibOpen) return;
+  if (document.getElementById("modal-star")?.classList.contains("active")) return;
+  showCoachTip(id, anchorSel);
+}
+
+function showCoachTip(id, anchorSel) {
+  const tip = COACH_TIPS[id];
+  if (!tip) return;
+  coachTipActiveId = id;
+  const root = document.getElementById("coach-tip");
+  const title = document.getElementById("coach-tip-title");
+  const body = document.getElementById("coach-tip-body");
+  if (title) title.textContent = tip.title;
+  if (body) body.textContent = tip.body;
+  coachTipAnchorEls = [];
+  if (anchorSel) {
+    document.querySelectorAll(anchorSel).forEach(el => {
+      el.classList.add("coach-highlight");
+      coachTipAnchorEls.push(el);
+    });
+  }
+  if (root) root.classList.add("show");
+}
+
+function dismissCoachTip(skipSeen) {
+  const id = coachTipActiveId;
+  coachTipActiveId = null;
+  coachTipAnchorEls.forEach(el => el.classList.remove("coach-highlight"));
+  coachTipAnchorEls = [];
+  document.getElementById("coach-tip")?.classList.remove("show");
+  if (!skipSeen && id) {
+    if (!settings.coachTipsSeen) settings.coachTipsSeen = {};
+    settings.coachTipsSeen[id] = true;
+    saveSettings();
+  }
 }
 
 function openAchievementsModal() {
@@ -7773,6 +8162,7 @@ function refreshGreenTapZone(now) {
         dwellMs,
         how: clearlyInside ? "clear" : "dwell"
       });
+      maybeShowCoachTip("green_tap", "#green-zone-line");
       return true;
     }
     return false;
@@ -8377,18 +8767,21 @@ function autoTeeOffSilent() {
   }
 
   const typical = typicalClubForHole(currentRound.courseId, currentHoleIndex, 1);
+  const rangeSug = !typical ? suggestClubForDistance(distanceToPin(pos)) : null;
+  const teeClub = typical || rangeSug || null;
   hole.teePosition = {
     lat: pos.lat,
     lon: pos.lon,
     accuracy: pos.accuracy || null,
-    club: typical || null,
+    club: teeClub,
     at: new Date().toISOString(),
     auto: true
   };
   anchorPosition = { lat: pos.lat, lon: pos.lon };
-  // Typical club is a hint until the swing marks — auto-mark runs normally from here
-  clubForCurrentShot = typical || null;
-  hole.nextClub = typical || null;
+  clubForCurrentShot = teeClub;
+  clubForCurrentShotAuto = !!teeClub;
+  clubSuggestSource = teeClub ? (typical ? "typical" : "range") : null;
+  hole.nextClub = teeClub;
   isTeeingOff = false;
   noteMarkEvent({ fromTee: true });
   resetTeeHandoffState();
@@ -8398,12 +8791,14 @@ function autoTeeOffSilent() {
   startAutoMarkWatch();
   updatePlayUI();
   if (pocketLocked) updatePocketLockInfo();
-  showToast(typical
-    ? `Hole ${hole.holeNumber} · auto tee · typical ${typical}`
-    : `Hole ${hole.holeNumber} · auto tee · watching for swing`);
+  const label = holeDisplayName(currentHoleIndex, currentCourse, hole);
+  showToast(teeClub
+    ? `${label} · auto tee · ${typical ? "typical" : "suggested"} ${teeClub}`
+    : `${label} · auto tee · watching for swing`);
   pushTestLog("auto_tee", {
     hole: hole.holeNumber,
     typical: typical || null,
+    suggested: rangeSug || null,
     dTee: known && gps
       ? Math.round(haversine(gps.lat, gps.lon, known.lat, known.lon))
       : null
@@ -8935,6 +9330,8 @@ function tryGreenTapPutt(pos) {
   });
   anchorPosition = { lat: to.lat, lon: to.lon };
   clubForCurrentShot = "Putter";
+  clubForCurrentShotAuto = true;
+  clubSuggestSource = "range";
   hole.nextClub = "Putter";
   lastAutoUndo = { holeIndex: currentHoleIndex, shotNumber: shotNum, prevAnchor: from };
   noteMarkEvent();
@@ -9217,6 +9614,7 @@ function commitHybridAutoMark(centroid, opts) {
     distance: dist,
     club: clubInfo.club,
     clubGuess: !!clubInfo.clubGuess,
+    clubSuggest: clubInfo.clubSuggest || null,
     shotLabel: clubInfo.shotLabel || null,
     from,
     to,
@@ -9227,9 +9625,11 @@ function commitHybridAutoMark(centroid, opts) {
   if (shotNum === 1) recordDrive(from, to);
 
   anchorPosition = { lat: to.lat, lon: to.lon };
-  const nextTypical = typicalClubForHole(currentRound.courseId, currentHoleIndex, shotNum + 1);
-  clubForCurrentShot = nextTypical || null;
-  hole.nextClub = nextTypical || null;
+  clubForCurrentShot = null;
+  clubForCurrentShotAuto = false;
+  clubSuggestSource = null;
+  refreshClubSuggestion({ force: true });
+  hole.nextClub = clubForCurrentShot || null;
 
   lastAutoUndo = {
     holeIndex: currentHoleIndex,
