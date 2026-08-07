@@ -370,6 +370,38 @@
       50% { transform: translateY(-11px) rotate(6deg); }
     }
 
+    #modal-star {
+      z-index: 850;
+      align-items: center;
+      justify-content: center;
+    }
+    #modal-star .modal-content {
+      border-radius: 20px;
+      margin: 16px;
+      width: calc(100% - 32px);
+      max-width: 340px;
+    }
+    .ach-new {
+      display: inline-block;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      padding: 2px 6px;
+      border-radius: 6px;
+      background: var(--accent);
+      color: #000;
+      margin-right: 6px;
+      vertical-align: middle;
+    }
+    #achievements-list li.ach-row {
+      cursor: pointer;
+    }
+    #achievements-list li.ach-row.unseen {
+      border-left: 3px solid var(--accent);
+      padding-left: 10px;
+    }
+
     #modal-star .star-celebrate {
       background:
         radial-gradient(ellipse at 50% 0%, rgba(255,255,255,0.55), transparent 55%),
@@ -1931,7 +1963,7 @@
   </div>
 
 <script>
-const APP_VERSION = "1.5.31";
+const APP_VERSION = "1.5.32";
 const PAGES_URL = "https://azzabazza11.github.io/golf-tracker/";
 const FEEDBACK_EMAIL = "aaron.callinan@gmail.com";
 const SUPPORT_URL = "https://ko-fi.com/aaroncallinan";
@@ -3048,11 +3080,13 @@ function enqueueStar(ach) {
   if (!ach || !ach.title) return;
   recordTestEvent("star_record");
   const entry = {
+    id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
     title: ach.title,
     headline: ach.headline || "",
     detail: ach.detail || "",
     eyebrow: ach.eyebrow || "New record",
-    at: new Date().toISOString()
+    at: new Date().toISOString(),
+    seen: false
   };
   starQueue.push(entry);
   achievementLog.push(entry);
@@ -3061,11 +3095,28 @@ function enqueueStar(ach) {
   updateStarBadge();
 }
 
+function achievementIsUnseen(a) {
+  return !!(a && a.seen === false);
+}
+
+function markAchievementsSeen(ids) {
+  if (!ids || !ids.length) return;
+  const set = new Set(ids);
+  let changed = false;
+  achievementLog.forEach(a => {
+    if (a && set.has(a.id) && a.seen === false) {
+      a.seen = true;
+      changed = true;
+    }
+  });
+  if (changed) saveAchievements();
+}
+
 function updateStarBadge() {
   const badge = document.getElementById("star-badge");
   const count = document.getElementById("star-count");
   if (!badge) return;
-  if (!starQueue.length) {
+  if (!starQueue.length || document.getElementById("modal-star")?.classList.contains("active")) {
     badge.classList.remove("show", "dragging");
     badge.style.transform = "";
     badge.style.opacity = "";
@@ -3088,12 +3139,7 @@ function clearStarQueue() {
   updateStarBadge();
 }
 
-function openStarCelebration() {
-  if (!starQueue.length) return;
-  const items = starQueue.slice();
-  starQueue = [];
-  updateStarBadge();
-
+function paintStarCelebration(items) {
   const eyebrow = document.getElementById("star-eyebrow");
   const title = document.getElementById("star-title");
   const headline = document.getElementById("star-headline");
@@ -3130,14 +3176,28 @@ function openStarCelebration() {
       ).join("");
     }
   }
+}
 
+function openStarCelebration(itemsOpt) {
+  const items = itemsOpt && itemsOpt.length ? itemsOpt.slice() : starQueue.slice();
+  if (!items.length) return;
+  if (!itemsOpt) starQueue = [];
+  else {
+    const ids = new Set(items.map(a => a.id));
+    starQueue = starQueue.filter(a => !ids.has(a.id));
+  }
+  markAchievementsSeen(items.map(a => a.id).filter(Boolean));
+  paintStarCelebration(items);
   document.getElementById("modal-star")?.classList.add("active");
+  updateStarBadge();
 }
 
 function dismissStarCelebration() {
   document.getElementById("modal-star")?.classList.remove("active");
+  updateStarBadge();
 }
 
+/** Swipe away: hide floating star, keep achievements unseen in the list. */
 function dismissStarBadgeOnly() {
   clearStarQueue();
 }
@@ -3147,10 +3207,45 @@ function bindStarBadgeGestures() {
   if (!badge || badge.dataset.bound) return;
   badge.dataset.bound = "1";
 
+  const TAP_SLOP_PX = 14;
+  const SWIPE_DISMISS_PX = 72;
+
+  function resetBadgeVisual() {
+    badge.classList.remove("dragging");
+    badge.style.transform = "";
+    badge.style.opacity = "";
+  }
+
+  function finishGesture(e) {
+    if (!starSwipe || (e && starSwipe.id !== e.pointerId)) return;
+    const dx = e ? e.clientX - starSwipe.x0 : 0;
+    const dy = e ? e.clientY - starSwipe.y0 : 0;
+    const dist = Math.hypot(dx, dy);
+    const moved = starSwipe.moved || dist > TAP_SLOP_PX;
+    starSwipe = null;
+    resetBadgeVisual();
+    if (e) {
+      try { badge.releasePointerCapture(e.pointerId); } catch (_) {}
+    }
+
+    if (!starQueue.length) return;
+
+    // Swipe away — keep in achievements list as unseen
+    if (moved && dist > SWIPE_DISMISS_PX) {
+      dismissStarBadgeOnly();
+      showToast("Saved to achievements");
+      return;
+    }
+    // Tap / cancelled short press → celebrate
+    openStarCelebration();
+  }
+
   badge.addEventListener("pointerdown", e => {
     if (!starQueue.length) return;
+    if (e.button != null && e.button !== 0) return;
     e.preventDefault();
-    badge.setPointerCapture(e.pointerId);
+    e.stopPropagation();
+    try { badge.setPointerCapture(e.pointerId); } catch (_) {}
     starSwipe = {
       id: e.pointerId,
       x0: e.clientX,
@@ -3164,41 +3259,18 @@ function bindStarBadgeGestures() {
     if (!starSwipe || starSwipe.id !== e.pointerId) return;
     const dx = e.clientX - starSwipe.x0;
     const dy = e.clientY - starSwipe.y0;
-    if (Math.abs(dx) > 6 || Math.abs(dy) > 6) starSwipe.moved = true;
+    if (Math.abs(dx) > TAP_SLOP_PX || Math.abs(dy) > TAP_SLOP_PX) starSwipe.moved = true;
+    if (!starSwipe.moved) return;
     const fade = Math.min(1, Math.hypot(dx, dy) / 120);
     badge.style.transform = `translate(${dx}px, ${dy}px) rotate(${dx * 0.12}deg)`;
     badge.style.opacity = String(1 - fade * 0.65);
   });
 
-  function endSwipe(e) {
-    if (!starSwipe || starSwipe.id !== e.pointerId) return;
-    const dx = e.clientX - starSwipe.x0;
-    const dy = e.clientY - starSwipe.y0;
-    const dist = Math.hypot(dx, dy);
-    starSwipe = null;
-    badge.classList.remove("dragging");
-    badge.style.transform = "";
-    badge.style.opacity = "";
-    try { badge.releasePointerCapture(e.pointerId); } catch (_) {}
-
-    // Swipe away to dismiss; any short press (incl. slight finger jitter) opens celebration
-    if (dist > 72) {
-      dismissStarBadgeOnly();
-      return;
-    }
-    openStarCelebration();
-  }
-
-  badge.addEventListener("pointerup", endSwipe);
-  badge.addEventListener("pointercancel", () => {
-    starSwipe = null;
-    badge.classList.remove("dragging");
-    badge.style.transform = "";
-    badge.style.opacity = "";
-  });
-  // Fallback for environments that synthesize click without a clean pointerup
+  badge.addEventListener("pointerup", finishGesture);
+  badge.addEventListener("pointercancel", finishGesture);
   badge.addEventListener("click", e => {
     e.preventDefault();
+    e.stopPropagation();
     if (starQueue.length) openStarCelebration();
   });
 }
@@ -7807,9 +7879,12 @@ function openAchievementsModal() {
   const sum = document.getElementById("achievements-summary");
   const list = document.getElementById("achievements-list");
   const pending = document.getElementById("achievements-pending");
+  const unseenN = achievementLog.filter(achievementIsUnseen).length;
   if (sum) {
     sum.textContent = settings.achievementsEnabled
-      ? `${achievementLog.length} saved · floating stars ${starQueue.length ? "pending — tap below or the ★" : "when you set a record"}`
+      ? `${achievementLog.length} saved` +
+        (unseenN ? ` · ${unseenN} new` : "") +
+        (starQueue.length ? " · floating ★ pending — tap the star or below" : "")
       : "Achievements are turned off — enable the toggle to earn stars again.";
   }
   if (pending) pending.style.display = starQueue.length ? "block" : "none";
@@ -7820,8 +7895,11 @@ function openAchievementsModal() {
       const rows = [...achievementLog].reverse().slice(0, 40);
       list.innerHTML = rows.map(a => {
         const when = a.at ? new Date(a.at).toLocaleString() : "";
-        const head = `${escapeHtml(a.eyebrow || "Record")} · ${escapeHtml(a.title)}${a.headline ? " · " + escapeHtml(a.headline) : ""}`;
-        return `<li>
+        const unseen = achievementIsUnseen(a);
+        const newMark = unseen ? `<span class="ach-new">New</span>` : "";
+        const head = `${newMark}${escapeHtml(a.eyebrow || "Record")} · ${escapeHtml(a.title)}${a.headline ? " · " + escapeHtml(a.headline) : ""}`;
+        const idAttr = a.id ? ` data-ach-id="${escapeHtml(a.id)}"` : "";
+        return `<li class="ach-row${unseen ? " unseen" : ""}"${idAttr} onclick="openAchievementFromList(this)">
           <span>${head}</span>
           <strong style="font-weight:500;color:var(--muted);font-size:12px">${escapeHtml(when)}</strong>
         </li>` + (a.detail ? `<li style="color:var(--muted);font-size:12px;padding-top:0">${escapeHtml(a.detail)}</li>` : "");
@@ -7829,6 +7907,15 @@ function openAchievementsModal() {
     }
   }
   document.getElementById("modal-achievements")?.classList.add("active");
+}
+
+function openAchievementFromList(el) {
+  const id = el && el.getAttribute("data-ach-id");
+  if (!id) return;
+  const ach = achievementLog.find(a => a && a.id === id);
+  if (!ach) return;
+  document.getElementById("modal-achievements")?.classList.remove("active");
+  openStarCelebration([ach]);
 }
 
 function openStarCelebrationFromSettings() {
