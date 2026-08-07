@@ -749,12 +749,35 @@
       touch-action: none;
       user-select: none;
       -webkit-user-select: none;
+      transition: background 0.45s ease, filter 0.45s ease;
     }
     .pocket-lock.show { display: flex; align-items: center; justify-content: center; }
+    .pocket-lock.dimmed {
+      background: #000;
+      filter: none;
+    }
+    .pocket-lock.dimmed .pocket-lock-inner {
+      opacity: 0.18;
+      transition: opacity 0.45s ease;
+    }
+    .pocket-lock.dimmed .pocket-swipe {
+      opacity: 0.5;
+      border-color: #222;
+      background: #111;
+    }
+    .pocket-lock.dimmed .pocket-swipe-text {
+      color: #666;
+    }
+    .pocket-lock.dimmed .pocket-swipe-knob {
+      background: #333;
+      color: #888;
+      box-shadow: none;
+    }
     .pocket-lock-inner {
       width: min(360px, 92vw);
       text-align: center;
       padding: 24px 16px;
+      transition: opacity 0.45s ease;
     }
     .pocket-lock-dist {
       font-size: 56px;
@@ -1311,7 +1334,7 @@
       <div class="setting-row">
         <div class="setting-text">
           <strong>Auto screen lock</strong>
-          <span>In shot mode, lock after a short idle so pocket taps do nothing. Swipe to unlock. Default on.</span>
+          <span>In shot mode, lock after a short idle so pocket taps do nothing. Dims after 25s to save battery; swipe wake then swipe unlock. Orientation can wake when available.</span>
         </div>
         <label class="switch">
           <input type="checkbox" id="setting-pocket-lock" onchange="onPocketLockAutoToggle(this.checked)">
@@ -1806,7 +1829,7 @@
       <p class="modal-note"><strong>Map circles</strong> — Tee: solid = near-tee; dashed = leave buffer. Green: solid = enter / lock green-tap; dashed = sticky leave (~150% of enter).</p>
       <p class="modal-note"><strong>Club suggest</strong> — If you haven’t picked a club, the app suggests your usual club for that hole/shot when known, otherwise a club for the distance to the pin. Highlighted = autofill — tap to change.</p>
       <p class="modal-note"><strong>Hole names</strong> — Optional: long-press a hole in the hole picker to set a custom name (default is Hole N).</p>
-      <p class="modal-note"><strong>Pocket lock</strong> — Idle lock in shot mode; swipe to unlock.</p>
+      <p class="modal-note"><strong>Pocket lock</strong> — Idle lock in shot mode; dims after 25s. Swipe to wake, then swipe again to unlock. Picking up the phone may wake via orientation when the browser allows it.</p>
       <button type="button" class="btn-primary" style="width:100%;margin-top:8px" onclick="closeModal()">Close</button>
     </div>
   </div>
@@ -1963,7 +1986,7 @@
   </div>
 
 <script>
-const APP_VERSION = "1.5.32";
+const APP_VERSION = "1.5.33";
 const PAGES_URL = "https://azzabazza11.github.io/golf-tracker/";
 const FEEDBACK_EMAIL = "aaron.callinan@gmail.com";
 const SUPPORT_URL = "https://ko-fi.com/aaroncallinan";
@@ -7529,13 +7552,20 @@ function onPocketLockAutoToggle(on) {
 
 // ---------- Pocket lock ----------
 let pocketLocked = false;
+let pocketLockDimmed = false;
 let pocketIdleTimer = null;
+let pocketDimTimer = null;
 let pocketSwipeBound = false;
 let pocketSwipeStartX = 0;
 let pocketSwipeOrigin = 0;
 let pocketSwipeMax = 0;
 let pocketSwipeDragging = false;
+let pocketOrientListening = false;
+let pocketOrientBaseline = null;
+let pocketOrientBaselineAt = 0;
 const POCKET_IDLE_MS = 20000;
+const POCKET_DIM_MS = 25000;
+const POCKET_ORIENT_WAKE_DEG = 16;
 
 function syncPocketLockDistance(text) {
   const el = document.getElementById("pocket-lock-distance");
@@ -7551,6 +7581,90 @@ function clearPocketLockIdle() {
     clearTimeout(pocketIdleTimer);
     pocketIdleTimer = null;
   }
+}
+
+function clearPocketDimTimer() {
+  if (pocketDimTimer) {
+    clearTimeout(pocketDimTimer);
+    pocketDimTimer = null;
+  }
+}
+
+function updatePocketSwipeLabel() {
+  const text = document.querySelector("#pocket-swipe .pocket-swipe-text");
+  if (!text) return;
+  text.textContent = pocketLockDimmed ? "Swipe to wake" : "Swipe to unlock";
+}
+
+function setPocketLockDimmed(dim) {
+  if (!pocketLocked && dim) return;
+  pocketLockDimmed = !!dim;
+  const overlay = document.getElementById("pocket-lock");
+  if (overlay) overlay.classList.toggle("dimmed", pocketLockDimmed);
+  updatePocketSwipeLabel();
+  if (pocketLockDimmed) {
+    clearPocketDimTimer();
+    pocketOrientBaseline = null;
+    pocketOrientBaselineAt = Date.now();
+    syncPlayWakeLock(); // release wake lock while dimmed
+  } else {
+    pocketOrientBaseline = null;
+    schedulePocketDim();
+    syncPlayWakeLock();
+  }
+}
+
+function schedulePocketDim() {
+  clearPocketDimTimer();
+  if (!pocketLocked || pocketLockDimmed) return;
+  pocketDimTimer = setTimeout(() => {
+    if (pocketLocked && !pocketLockDimmed) setPocketLockDimmed(true);
+  }, POCKET_DIM_MS);
+}
+
+function brightenPocketLock() {
+  if (!pocketLocked) return;
+  if (!pocketLockDimmed) {
+    schedulePocketDim();
+    return;
+  }
+  setPocketLockDimmed(false);
+  resetPocketSwipeKnob();
+}
+
+function onPocketDeviceOrientation(ev) {
+  if (!pocketLocked || !pocketLockDimmed) return;
+  const beta = ev.beta;
+  const gamma = ev.gamma;
+  if (beta == null || gamma == null || !Number.isFinite(beta) || !Number.isFinite(gamma)) return;
+  // Establish resting baseline shortly after dimming
+  if (!pocketOrientBaseline) {
+    if (Date.now() - pocketOrientBaselineAt < 600) return;
+    pocketOrientBaseline = { beta, gamma };
+    return;
+  }
+  const d = Math.hypot(beta - pocketOrientBaseline.beta, gamma - pocketOrientBaseline.gamma);
+  if (d >= POCKET_ORIENT_WAKE_DEG) brightenPocketLock();
+}
+
+function startPocketOrientListen() {
+  if (pocketOrientListening) return;
+  pocketOrientListening = true;
+  window.addEventListener("deviceorientation", onPocketDeviceOrientation, true);
+  // iOS may need permission — best-effort (engage often follows a gesture)
+  try {
+    if (typeof DeviceOrientationEvent !== "undefined" &&
+        typeof DeviceOrientationEvent.requestPermission === "function") {
+      DeviceOrientationEvent.requestPermission().catch(() => {});
+    }
+  } catch (_) {}
+}
+
+function stopPocketOrientListen() {
+  if (!pocketOrientListening) return;
+  pocketOrientListening = false;
+  window.removeEventListener("deviceorientation", onPocketDeviceOrientation, true);
+  pocketOrientBaseline = null;
 }
 
 function schedulePocketLockIdle() {
@@ -7577,16 +7691,21 @@ function engagePocketLock() {
   }
   clearPocketLockIdle();
   pocketLocked = true;
+  pocketLockDimmed = false;
   const live = document.getElementById("live-distance");
   syncPocketLockDistance(live ? live.textContent : "—");
   updatePocketLockInfo();
   updateAutoMarkCountdownUI();
-  syncPlayWakeLock();
   const overlay = document.getElementById("pocket-lock");
   overlay.classList.add("show");
+  overlay.classList.remove("dimmed");
   overlay.setAttribute("aria-hidden", "false");
   resetPocketSwipeKnob();
+  updatePocketSwipeLabel();
   bindPocketSwipe();
+  startPocketOrientListen();
+  schedulePocketDim();
+  syncPlayWakeLock();
   recordTestEvent("pocket_lock");
 }
 
@@ -7632,11 +7751,19 @@ function updatePocketLockInfo() {
 
 function unlockPocketLock() {
   if (!pocketLocked) return;
+  if (pocketLockDimmed) {
+    brightenPocketLock();
+    return;
+  }
   pocketLocked = false;
+  pocketLockDimmed = false;
+  clearPocketDimTimer();
+  stopPocketOrientListen();
   const overlay = document.getElementById("pocket-lock");
-  overlay.classList.remove("show");
+  overlay.classList.remove("show", "dimmed");
   overlay.setAttribute("aria-hidden", "true");
   resetPocketSwipeKnob();
+  updatePocketSwipeLabel();
   schedulePocketLockIdle();
   syncPlayWakeLock();
   recordTestEvent("pocket_unlock");
@@ -7674,6 +7801,12 @@ function bindPocketSwipe() {
     knob.style.transform = `translateX(${x}px)`;
     if (pocketSwipeMax > 0 && x >= pocketSwipeMax * 0.78) {
       pocketSwipeDragging = false;
+      if (pocketLockDimmed) {
+        // First full swipe while dimmed only wakes — does not unlock
+        brightenPocketLock();
+        resetPocketSwipeKnob();
+        return;
+      }
       unlockPocketLock();
     }
   }
@@ -8626,7 +8759,11 @@ async function releasePlayWakeLock() {
 }
 
 function shouldHoldPlayWakeLock() {
-  return !!(settings.autoMark && currentRound && (autoMarkWatching || pocketLocked || calRecording));
+  if (!(settings.autoMark && currentRound)) return !!calRecording;
+  if (calRecording) return true;
+  // Dimmed pocket lock: allow screen to sleep for battery
+  if (pocketLocked && pocketLockDimmed) return false;
+  return !!(autoMarkWatching || pocketLocked);
 }
 
 function syncPlayWakeLock() {
@@ -8637,7 +8774,8 @@ function syncPlayWakeLock() {
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") {
     if (calRecording) requestCalWakeLock();
-    if (shouldHoldPlayWakeLock()) requestPlayWakeLock();
+    if (pocketLocked && pocketLockDimmed) brightenPocketLock();
+    else if (shouldHoldPlayWakeLock()) requestPlayWakeLock();
   }
 });
 
