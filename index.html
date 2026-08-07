@@ -1753,7 +1753,7 @@
   </div>
 
 <script>
-const APP_VERSION = "1.5.13";
+const APP_VERSION = "1.5.14";
 const PAGES_URL = "https://azzabazza11.github.io/golf-tracker/";
 const FEEDBACK_EMAIL = "aaron.callinan@gmail.com";
 const SUPPORT_URL = "https://ko-fi.com/aaroncallinan";
@@ -1789,7 +1789,8 @@ const TEST_LOG_MAX = 2500;
 const MOTION_PEAK_HALFLIFE_S = 1.6;
 const HYBRID_MARKED_FLASH_MS = 1800;
 /** Brief motion spikes above stop threshold are ignored this long (buffer). */
-const MOTION_QUIET_BUFFER_MS = 400;
+const MOTION_QUIET_BUFFER_MS = 700; // ignore brief peak spikes while stopped
+const MOTION_STOP_EXIT_MARGIN = 8;  // stay quiet until peak > stopPeak + margin
 
 const SENSITIVITY_DEFAULTS = {
   autoMarkSettleM: 3,
@@ -7195,9 +7196,12 @@ function setToneLegend(text, logType, data) {
   updateAmStageUI();
 }
 
-/** Peak at/under stop threshold (primary real-world stop signal). */
+/** Peak quiet with hysteresis — enter at stopPeak, leave only above stopPeak + margin. */
 function isMotionBelowStopPeak() {
-  return motionPeakHold <= sens("motionStopPeak");
+  const enter = sens("motionStopPeak");
+  const exit = enter + MOTION_STOP_EXIT_MARGIN;
+  if (motionQuietSince) return motionPeakHold <= exit;
+  return motionPeakHold <= enter;
 }
 
 /**
@@ -7313,7 +7317,7 @@ function hybridStageMetaText() {
   const away = metresFromMarkSpot();
   const fromSpot = away == null ? "—" : away.toFixed(1) + " m";
   const mq = Math.round(motionQuietProgress() * 100);
-  return `peak ${motPct}≤${stopAt} · quiet ${mq}% · from spot ${fromSpot}`;
+  return `peak ${motPct}≤${stopAt} (+${MOTION_STOP_EXIT_MARGIN}) · quiet ${mq}% · from spot ${fromSpot}`;
 }
 
 function updateAmStageUI() {
@@ -7357,14 +7361,16 @@ function updateAmStageUI() {
   }
 }
 
-/** Test mode: rising tempo while motion-stop countdown runs. */
+/** Test mode: rising tempo whenever stop-hold countdown is running. */
 function tickSettleTempoAudio(cluster) {
   if (!settings.testMode || !settings.markSound) {
     settleTempoWasSettling = false;
     return;
   }
   const progress = motionQuietProgress();
-  const settling = hybridStage === "settling" && progress > 0.05 && progress < 1;
+  // Audio tracks quiet progress in settling (and watching if quiet clock already running)
+  const settling = (hybridStage === "settling" || (hybridStage === "watching" && progress > 0.05))
+    && progress > 0.05 && progress < 1;
   if (!settling) {
     settleTempoWasSettling = false;
     return;
@@ -7376,6 +7382,9 @@ function tickSettleTempoAudio(cluster) {
   settleTempoLastAt = now;
   ensureAudioCtx();
   if (!audioCtx) return;
+  if (audioCtx.state === "suspended") {
+    try { audioCtx.resume(); } catch (_) {}
+  }
   const freq = 420 + progress * 480;
   const t0 = audioCtx.currentTime;
   const osc = audioCtx.createOscillator();
@@ -7396,6 +7405,7 @@ function tickSettleTempoAudio(cluster) {
     pushTestLog("settle_tick", {
       progress: Math.round(progress * 100),
       peak: Math.round(motionPeakHold),
+      stage: hybridStage,
       legend: lastToneLegend
     });
   }
@@ -7840,7 +7850,7 @@ function noteMarkEvent() {
   hybridStage = "marked";
   hybridMarkedUntil = now + HYBRID_MARKED_FLASH_MS;
   settleTempoWasSettling = false;
-  autoMarkCooldownUntil = now + 25000;
+  autoMarkCooldownUntil = now + 8000;
   if (autoMarkWatching) ensureAutoMarkSettleTick();
   else stopAutoMarkSettleTick();
   updateAutoMarkCountdownUI();
@@ -8208,21 +8218,8 @@ function updateHybridAutoMark() {
     }
   }
 
-  if (now < autoMarkCooldownUntil && hybridStage !== "shot_triggered") {
-    tickSettleTempoAudio(cluster);
-    updateAutoMarkCountdownUI();
-    updateGpsDiagUI();
-    return;
-  }
-  if (now - lastMarkAt < minAutoMarkIntervalMs()
-      && hybridStage !== "shot_triggered"
-      && hybridStage !== "armed"
-      && hybridStage !== "settling") {
-    tickSettleTempoAudio(cluster);
-    updateAutoMarkCountdownUI();
-    updateGpsDiagUI();
-    return;
-  }
+  // Cooldown / min-interval only block a NEW swing trigger — settling must always run
+  const blockNewSwing = (now < autoMarkCooldownUntil) || (now - lastMarkAt < minAutoMarkIntervalMs());
 
   // Watching / settling — motion stop only; GPS just refines mark spot
   if (hybridStage === "watching" || hybridStage === "settling") {
@@ -8236,7 +8233,6 @@ function updateHybridAutoMark() {
           via: "motion"
         });
       }
-      // Keep narrowing GPS spot while standing
       const spot = pickHybridMarkSpot(looseCluster);
       if (spot) hybridMarkSpot = spot;
 
@@ -8263,12 +8259,13 @@ function updateHybridAutoMark() {
   }
 
   if (hybridStage === "armed") {
-    // Still refine GPS while waiting for swing
     if (stop.quiet) {
       const spot = pickHybridMarkSpot(cluster.settled && cluster.centroid ? cluster : looseCluster);
       if (spot) hybridMarkSpot = spot;
     }
-    if (isSwingBurst() || motionPeakHold >= swingArmThreshold()) {
+    if (blockNewSwing) {
+      // Stay armed; ignore swings until cooldown/interval clears
+    } else if (isSwingBurst() || motionPeakHold >= swingArmThreshold()) {
       hybridStage = "shot_triggered";
       hybridSwingAt = now;
       hybridConfirmAt = 0;
@@ -8286,7 +8283,6 @@ function updateHybridAutoMark() {
         }
       );
     } else if (!stop.quiet) {
-      // Walked off without a swing burst
       hybridStage = "watching";
       hybridMarkSpot = null;
       hybridArmedAt = 0;
