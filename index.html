@@ -1833,7 +1833,7 @@
   </div>
 
 <script>
-const APP_VERSION = "1.5.25";
+const APP_VERSION = "1.5.26";
 const PAGES_URL = "https://azzabazza11.github.io/golf-tracker/";
 const FEEDBACK_EMAIL = "aaron.callinan@gmail.com";
 const SUPPORT_URL = "https://ko-fi.com/aaroncallinan";
@@ -1854,8 +1854,14 @@ const COURSE_DETECT_M = 120;
 const GREEN_TAP_WINDOW_MS = 2800; // fallback; prefer sens("greenTapWindowMs")
 const GREEN_TAP_COUNT = 3;
 const GREEN_TAP_REFRACTORY_MS = 450; // fallback; prefer sens("greenTapRefractoryMs")
-const GREEN_TAP_ARM_MS = 1400; // dwell after entering zone — filters GPS jumps onto green
-const GREEN_TAP_EXIT_BUFFER_M = 4;
+const GREEN_TAP_ARM_MS = 900; // short arm after lock (enter confirm already waited)
+/** Leave radius = max(enter×ratio, enter+minExtra) — chip/roll off green must not flip-flop. */
+const GREEN_TAP_LEAVE_RATIO = 1.5;
+const GREEN_TAP_LEAVE_MIN_EXTRA_M = 8;
+/** Must stay inside enter radius (or clearly inside) before sticky lock. */
+const GREEN_TAP_ENTER_CONFIRM_MS = 2200;
+/** Must stay outside leave radius before unlocking back to hybrid. */
+const GREEN_TAP_LEAVE_CONFIRM_MS = 2800;
 const GREEN_TAP_SENS_KEYS = [
   "greenTapDelta",
   "greenTapFloor",
@@ -1970,7 +1976,7 @@ const SENSITIVITY_RANGES = {
   teeNearM: { min: 2, max: 8, step: 0.5, label: "Tee near radius (m)" },
   teeLeaveM: { min: 4, max: 15, step: 1, label: "Tee leave radius (m)" },
   pinAcceptM: { min: 5, max: 20, step: 1, label: "Pin accept radius (m)" },
-  onGreenM: { min: 3, max: 25, step: 1, label: "On-green / green-tap radius (m)" },
+  onGreenM: { min: 3, max: 25, step: 1, label: "On-green enter radius (m; sticky leave ~150%)" },
   motionSensitivity: { min: 1, max: 10, step: 1, label: "Swing keenness (1 strict → 10 keen)" },
   motionStopPeak: { min: 8, max: 45, step: 1, label: "Stop when motion peak ≤" },
   motionStopS: { min: 1, max: 10, step: 0.5, label: "Stop hold time (s)" },
@@ -2147,8 +2153,10 @@ let greenTapBumpCount = 0;
 let greenTapFlashUntil = 0;
 let lastGreenTapLogAt = 0;
 let lastGreenTapCountedAt = 0;
-let greenTapArmUntil = 0;     // ignore taps until this time after entering zone
-let greenTapWasInZone = false;
+let greenTapArmUntil = 0;     // ignore taps until this time after sticky lock
+let greenTapLocked = false;   // sticky ON GREEN — hysteresis until leave confirm
+let greenTapEnterSince = 0;   // candidate: first time d ≤ enterM
+let greenTapLeaveSince = 0;   // locked: first time d > leaveM
 let greenTapSpikeActive = false;
 let greenTapSpikeStart = 0;
 let greenTapSpikePeak = 0;
@@ -4542,6 +4550,7 @@ function holeOut() {
   }
 
   stopAutoMarkWatch();
+  resetGreenTapZoneState();
 
   const hole = currentRound.holes[currentHoleIndex];
   const from = { ...anchorPosition };
@@ -6543,8 +6552,8 @@ function drawHoleMap() {
   }
 
   // To-scale event zones (tee near / on-green tap)
-  const youInGreen = !!(youPos && pts.green && settings.greenTapPutts &&
-    haversine(youPos.lat, youPos.lon, pts.green.lat, pts.green.lon) <= sens("onGreenM"));
+  const greenRadii = greenTapRadii();
+  const youInGreen = !!(youPos && pts.green && settings.greenTapPutts && greenTapLocked);
   const youNearTee = !!(youPos && pts.tee &&
     haversine(youPos.lat, youPos.lon, pts.tee.lat, pts.tee.lon) <= sens("teeNearM"));
   if (teeM) {
@@ -6565,14 +6574,14 @@ function drawHoleMap() {
   if (greenM && settings.greenTapPutts) {
     drawZoneCircle(
       greenM,
-      sens("onGreenM") + GREEN_TAP_EXIT_BUFFER_M,
+      greenRadii.leaveM,
       "rgba(46,204,113,0.35)",
       null,
       [5 / Math.max(view.scale, 0.01), 4 / Math.max(view.scale, 0.01)]
     );
     drawZoneCircle(
       greenM,
-      sens("onGreenM"),
+      greenRadii.enterM,
       youInGreen ? "rgba(46,204,113,0.95)" : "rgba(46,204,113,0.75)",
       youInGreen ? "rgba(46,204,113,0.28)" : "rgba(46,204,113,0.1)"
     );
@@ -7375,6 +7384,7 @@ function onHandsOffToggle(on) {
 function onGreenTapToggle(on) {
   settings.greenTapPutts = !!on;
   saveSettings();
+  if (!on) resetGreenTapZoneState();
   if (on) {
     ensureMotionPermission().then(ok => {
       if (ok) startMotionDiagListener();
@@ -7384,6 +7394,7 @@ function onGreenTapToggle(on) {
     stopMotionDiagListener();
   }
   renderSettings();
+  updateGreenZoneUI();
 }
 
 function onAchievementsToggle(on) {
@@ -7667,17 +7678,113 @@ function metresFromMarkSpot() {
   return haversine(hybridMarkSpot.lat, hybridMarkSpot.lon, pos.lat, pos.lon);
 }
 
-/** Green-tap zone with exit hysteresis (GPS flicker must not clear tap count). */
-function inGreenTapZone() {
-  if (!settings.greenTapPutts || !settings.autoMark || !currentRound || isTeeingOff) return false;
-  const pin = getPin(currentHoleIndex);
-  const pos = getBestMarkPosition() || currentPosition;
-  if (!pin || !pos) return false;
-  const d = haversine(pos.lat, pos.lon, pin.lat, pin.lon);
+function greenTapRadii() {
   const enterM = sens("onGreenM");
-  const leaveM = enterM + GREEN_TAP_EXIT_BUFFER_M;
-  if (greenTapWasInZone) return d <= leaveM;
-  return d <= enterM;
+  const leaveM = Math.max(enterM * GREEN_TAP_LEAVE_RATIO, enterM + GREEN_TAP_LEAVE_MIN_EXTRA_M);
+  return { enterM, leaveM };
+}
+
+/** Freshest fix for zone membership (avoid stale settle centroid flip-flop). */
+function greenTapLivePos() {
+  if (currentPosition) return currentPosition;
+  if (gpsGoodBuf.length) {
+    const last = gpsGoodBuf[gpsGoodBuf.length - 1];
+    return { lat: last.lat, lon: last.lon, accuracy: last.accuracy };
+  }
+  return getBestMarkPosition();
+}
+
+function resetGreenTapZoneState(clearTaps) {
+  greenTapLocked = false;
+  greenTapEnterSince = 0;
+  greenTapLeaveSince = 0;
+  greenTapNearPin = false;
+  greenTapArmUntil = 0;
+  if (clearTaps !== false) {
+    greenTapTimes = [];
+    greenTapBumpCount = 0;
+  }
+}
+
+/**
+ * Sticky green zone: confirm enter (dwell or clearly inside), then stay locked
+ * until outside leave radius (~150% of on-green) for leave-confirm ms.
+ * GPS jumps must not flip taps ↔ hybrid.
+ */
+function refreshGreenTapZone(now) {
+  now = now || Date.now();
+  if (!settings.greenTapPutts || !settings.autoMark || !currentRound || isTeeingOff) {
+    if (greenTapLocked || greenTapEnterSince) resetGreenTapZoneState();
+    return false;
+  }
+  const pin = getPin(currentHoleIndex);
+  const pos = greenTapLivePos();
+  if (!pin || !pos) {
+    // Brief GPS gap: keep sticky lock so taps do not die mid-putt
+    return greenTapLocked;
+  }
+  const d = haversine(pos.lat, pos.lon, pin.lat, pin.lon);
+  const { enterM, leaveM } = greenTapRadii();
+  const acc = pos.accuracy != null && isFinite(pos.accuracy) ? pos.accuracy : 12;
+  const clearlyInside = (d + Math.min(acc, 10)) <= enterM;
+  const insideEnter = d <= enterM;
+  const outsideLeave = d > leaveM;
+
+  if (greenTapLocked) {
+    if (outsideLeave) {
+      if (!greenTapLeaveSince) greenTapLeaveSince = now;
+      if (now - greenTapLeaveSince >= GREEN_TAP_LEAVE_CONFIRM_MS) {
+        pushTestLog("green_zone_leave", {
+          d: Math.round(d * 10) / 10,
+          enterM,
+          leaveM,
+          accuracy: Math.round(acc * 10) / 10,
+          outsideMs: now - greenTapLeaveSince
+        });
+        resetGreenTapZoneState();
+        return false;
+      }
+      // Still leaving — keep taps alive until confirm
+      return true;
+    }
+    greenTapLeaveSince = 0;
+    return true;
+  }
+
+  // Not locked: require confident enter before sticky
+  if (insideEnter) {
+    if (!greenTapEnterSince) greenTapEnterSince = now;
+    const dwellOk = now - greenTapEnterSince >= GREEN_TAP_ENTER_CONFIRM_MS;
+    if (clearlyInside || dwellOk) {
+      const dwellMs = greenTapEnterSince ? now - greenTapEnterSince : 0;
+      greenTapLocked = true;
+      greenTapEnterSince = 0;
+      greenTapLeaveSince = 0;
+      greenTapTimes = [];
+      greenTapBumpCount = 0;
+      greenTapArmUntil = now + GREEN_TAP_ARM_MS;
+      lastGreenTapCountedAt = 0;
+      pushTestLog("green_zone_lock", {
+        d: Math.round(d * 10) / 10,
+        enterM,
+        leaveM,
+        accuracy: Math.round(acc * 10) / 10,
+        clearlyInside: !!clearlyInside,
+        dwellMs,
+        how: clearlyInside ? "clear" : "dwell"
+      });
+      return true;
+    }
+    return false;
+  }
+
+  greenTapEnterSince = 0;
+  return false;
+}
+
+/** Green-tap sticky zone (updates lock/hysteresis). */
+function inGreenTapZone() {
+  return refreshGreenTapZone();
 }
 
 function metresToPin() {
@@ -7696,8 +7803,9 @@ function updateGreenZoneUI() {
     return;
   }
   const pin = getPin(currentHoleIndex);
-  const d = metresToPin();
-  const enterM = sens("onGreenM");
+  const pos = greenTapLivePos();
+  const d = pin && pos ? haversine(pos.lat, pos.lon, pin.lat, pin.lon) : null;
+  const { enterM, leaveM } = greenTapRadii();
   if (!pin) {
     el.classList.add("show");
     el.classList.remove("in-zone");
@@ -7709,14 +7817,25 @@ function updateGreenZoneUI() {
     el.textContent = "";
     return;
   }
-  if (inGreenTapZone()) {
+  const now = Date.now();
+  if (greenTapLocked) {
     el.classList.add("show", "in-zone");
     const bumps = greenTapBumpCount > 0 ? ` · bumps ${greenTapBumpCount}/${GREEN_TAP_COUNT}` : "";
-    el.textContent = `ON GREEN · ${d.toFixed(1)} m to pin · tap zone active${bumps}`;
-  } else if (d <= enterM + 20) {
+    if (greenTapLeaveSince) {
+      const left = Math.max(0, GREEN_TAP_LEAVE_CONFIRM_MS - (now - greenTapLeaveSince));
+      el.textContent = `ON GREEN · leaving? ${d.toFixed(1)} m (unlock ${leaveM.toFixed(0)} m · ${(left / 1000).toFixed(1)}s)${bumps}`;
+    } else {
+      el.textContent = `ON GREEN · ${d.toFixed(1)} m to pin · sticky ≤${leaveM.toFixed(0)} m${bumps}`;
+    }
+  } else if (greenTapEnterSince && d <= enterM) {
     el.classList.add("show");
     el.classList.remove("in-zone");
-    el.textContent = `${d.toFixed(1)} m to pin · green tap needs ≤${enterM} m (chip/bump OK here)`;
+    const left = Math.max(0, GREEN_TAP_ENTER_CONFIRM_MS - (now - greenTapEnterSince));
+    el.textContent = `${d.toFixed(1)} m · confirming green ${(left / 1000).toFixed(1)}s… (enter ≤${enterM} m)`;
+  } else if (d <= leaveM + 15) {
+    el.classList.add("show");
+    el.classList.remove("in-zone");
+    el.textContent = `${d.toFixed(1)} m to pin · green tap locks ≤${enterM} m · stays to ${leaveM.toFixed(0)} m`;
   } else {
     el.classList.remove("show", "in-zone");
     el.textContent = "";
@@ -8495,29 +8614,24 @@ function onDeviceMotion(ev) {
   }
 
   if (!settings.greenTapPutts || !settings.autoMark || !currentRound || isTeeingOff) {
-    greenTapNearPin = false;
-    greenTapBumpCount = 0;
-    greenTapWasInZone = false;
+    resetGreenTapZoneState();
     return;
   }
   if (teeHandoffInProgress || inTeeHandoffNearZone()) return;
   if (!onGreen) {
     greenTapNearPin = false;
-    if (!greenTapWasInZone) {
-      greenTapTimes = [];
-      greenTapBumpCount = 0;
-    }
-    // Throttled: help diagnose "I was on the green but taps didn't count"
+    // Throttled: near green but not sticky-locked (confirming / outside / left)
     const pin = getPin(currentHoleIndex);
-    const pos = getBestMarkPosition() || currentPosition;
+    const pos = greenTapLivePos();
     if (pin && pos) {
       const dPin = haversine(pos.lat, pos.lon, pin.lat, pin.lon);
-      const enterM = sens("onGreenM");
-      if (dPin <= enterM + 25) {
+      const { enterM, leaveM } = greenTapRadii();
+      if (dPin <= leaveM + 20) {
         pushTestLog("green_outside", {
           dPin: Math.round(dPin * 10) / 10,
           enterM,
-          onGreenM: sens("onGreenM"),
+          leaveM,
+          confirming: !!greenTapEnterSince,
           accuracy: pos.accuracy != null ? Math.round(pos.accuracy * 10) / 10 : null
         });
       }
@@ -8895,15 +9009,9 @@ function updateHybridAutoMark() {
   if (teeHandoffInProgress || inTeeHandoffNearZone()) return;
   if (!anchorPosition) return;
 
-  // Green tap on + near pin: pause hybrid entirely (either/or)
-  if (inGreenTapZone()) {
-    if (!greenTapWasInZone) {
-      greenTapWasInZone = true;
-      greenTapTimes = [];
-      greenTapBumpCount = 0;
-      greenTapArmUntil = Date.now() + GREEN_TAP_ARM_MS;
-      lastGreenTapCountedAt = 0;
-    }
+  // Sticky green lock: pause hybrid entirely (either/or) until leave confirm
+  if (refreshGreenTapZone()) {
+    greenTapNearPin = true;
     if (hybridStage !== "watching" && hybridStage !== "marked") {
       pushTestLog("hybrid_paused_green", { was: hybridStage });
       hybridStage = "watching";
@@ -8918,13 +9026,8 @@ function updateHybridAutoMark() {
     updateAutoMarkCountdownUI();
     updateGpsDiagUI();
     updateAmStageUI();
+    updateGreenZoneUI();
     return;
-  }
-  if (greenTapWasInZone) {
-    greenTapWasInZone = false;
-    greenTapTimes = [];
-    greenTapBumpCount = 0;
-    greenTapNearPin = false;
   }
 
   const cluster = getSettleCluster();
