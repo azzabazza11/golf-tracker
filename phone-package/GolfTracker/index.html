@@ -1259,7 +1259,7 @@
     <details class="card settings-acc" id="sensitivity-card">
       <summary class="settings-acc-summary">Auto-mark sensitivity</summary>
       <div class="settings-acc-body">
-        <p class="modal-note" style="margin-bottom:8px">Motion stop peak + hold time arm the shot. After a swing, walk the set distance and the shot marks immediately. On green with green-tap on, hybrid pauses.</p>
+        <p class="modal-note" style="margin-bottom:8px">Motion stop peak + hold time arm the shot. A swing marks immediately at that spot; walking away only plays a confirm chime. On green with green-tap on, hybrid pauses.</p>
         <div class="sens-presets" id="sens-presets">
           <button type="button" data-preset="strict" onclick="applySensPreset('strict')">Strict</button>
           <button type="button" data-preset="balanced" onclick="applySensPreset('balanced')">Balanced</button>
@@ -1753,7 +1753,7 @@
   </div>
 
 <script>
-const APP_VERSION = "1.5.18";
+const APP_VERSION = "1.5.19";
 const PAGES_URL = "https://azzabazza11.github.io/golf-tracker/";
 const FEEDBACK_EMAIL = "aaron.callinan@gmail.com";
 const SUPPORT_URL = "https://ko-fi.com/aaroncallinan";
@@ -1872,7 +1872,7 @@ const SENSITIVITY_RANGES = {
   motionSensitivity: { min: 1, max: 10, step: 1, label: "Swing keenness (1 strict → 10 keen)" },
   motionStopPeak: { min: 8, max: 45, step: 1, label: "Stop when motion peak ≤" },
   motionStopS: { min: 1, max: 10, step: 0.5, label: "Stop hold time (s)" },
-  markConfirmMoveM: { min: 1, max: 8, step: 0.5, label: "Mark after walking (m)" }
+  markConfirmMoveM: { min: 1, max: 8, step: 0.5, label: "Walk-away confirm chime (m)" }
 };
 
 // Safe storage load — never reference `courses`/`rounds` inside this helper (avoids TDZ)
@@ -2034,12 +2034,14 @@ let greenTapWasInZone = false;
 let courseSuggestId = null;
 let beginTeeChimedHole = null;
 
-// Hybrid auto-mark: motion stop → arm → swing → walk away → mark
+// Hybrid auto-mark: motion stop → arm → swing marks immediately → walk chime only
 let hybridStage = "watching"; // watching | settling | armed | shot_triggered | marked
 let hybridMarkSpot = null;    // GPS spot at arm / last refine before swing
 let hybridArmedAt = 0;
 let hybridSwingAt = 0;        // when swing was seen (shot_triggered)
 let hybridMarkedUntil = 0;
+let hybridWalkChimeSpot = null; // after mark: chime once when user walks away
+let hybridWalkChimeDone = false;
 let motionQuietSince = null;  // continuous-enough quiet clock start
 let motionLoudSince = null;   // spike above stop threshold (buffer)
 let motionPeakHold = 0;
@@ -3280,30 +3282,8 @@ function updateLiveDistance() {
   if (document.getElementById("modal-tee").classList.contains("active")) {
     updateToHoleDisplay("tee-to-hole", currentPosition);
   }
-  refreshInProgressShotDistance();
   checkTeeHandoffProximity();
   maybeAutoTeeHandsOff();
-}
-
-function refreshInProgressShotDistance() {
-  if (!(hybridStage === "shot_triggered" && autoMarkWatching && currentRound && anchorPosition)) return;
-  const list = document.getElementById("hole-shots");
-  if (!list) return;
-  const hole = currentRound.holes[currentHoleIndex];
-  const liveTo = currentPosition || hybridMarkSpot;
-  const liveDist = liveTo
-    ? haversine(anchorPosition.lat, anchorPosition.lon, liveTo.lat, liveTo.lon)
-    : null;
-  const nextN = hole.shots.length + 1;
-  const label = liveDist != null ? Math.round(liveDist) + " m" : "—";
-  let row = list.querySelector("[data-in-progress-shot]");
-  if (!row) {
-    row = document.createElement("li");
-    row.dataset.inProgressShot = "1";
-    row.style.color = "var(--accent)";
-    list.appendChild(row);
-  }
-  row.innerHTML = `<span>Shot ${nextN} · walking…</span><strong>${label}</strong>`;
 }
 
 // ---------- Course hole extras (pin + drives) ----------
@@ -3867,12 +3847,25 @@ function roundAwaitingFirstTee() {
 }
 
 function maybeAutoTeeHandsOff() {
-  if (!currentRound || currentRound.mode !== "handsOff" || !settings.autoMark) return;
+  if (!currentRound || currentRound.mode !== "handsOff") return;
   if (!isTeeingOff) return;
   // First tee still uses Begin Round once; every later tee is automatic
   if (roundAwaitingFirstTee()) return;
   if (teeHandoffInProgress) return;
-  autoTeeOffSilent();
+  // Prefer auto-mark path; still tee silently even if auto-mark toggle is off
+  if (!autoTeeOffSilent() && settings.autoMark) {
+    // #region agent log
+    dbgAgentLog("H-TEE", "maybeAutoTeeHandsOff", "auto_tee_failed", {
+      hole: currentHoleIndex + 1,
+      hasPos: !!(getBestMarkPosition() || currentPosition),
+      hasKnown: !!knownTeeForHole(
+        currentRound.courseId,
+        currentHoleIndex,
+        currentRound.holes[currentHoleIndex]
+      )
+    });
+    // #endregion
+  }
 }
 
 /** Hands-off: keep current hole = nearest known tee until Begin Round / auto tee. */
@@ -4013,28 +4006,16 @@ function updatePlayUI() {
     `Hole ${hole.holeNumber} · Par ${hole.par}`;
 
   const list = document.getElementById("hole-shots");
-  if (hole.shots.length === 0 && !(hybridStage === "shot_triggered" && autoMarkWatching)) {
+  if (hole.shots.length === 0) {
     list.innerHTML = `<li style="color:var(--muted)">No shots yet</li>`;
   } else {
-    const rows = hole.shots.map((s, idx) => {
+    list.innerHTML = hole.shots.map((s, idx) => {
       const clubLabel = shotClubDisplayHtml(s);
       return `<li class="editable" onclick="openClubEditLive(${idx})">
         <span>Shot ${s.number} · ${clubLabel}${s.auto ? " · auto" : ""}</span>
         <strong>${Math.round(s.distance)} m</strong>
       </li>`;
-    });
-    if (hybridStage === "shot_triggered" && autoMarkWatching && anchorPosition) {
-      const liveTo = (currentPosition || hybridMarkSpot);
-      const liveDist = liveTo
-        ? haversine(anchorPosition.lat, anchorPosition.lon, liveTo.lat, liveTo.lon)
-        : null;
-      const nextN = hole.shots.length + 1;
-      rows.push(`<li data-in-progress-shot="1" style="color:var(--accent)">
-        <span>Shot ${nextN} · walking…</span>
-        <strong>${liveDist != null ? Math.round(liveDist) + " m" : "—"}</strong>
-      </li>`);
-    }
-    list.innerHTML = rows.join("");
+    }).join("");
   }
 
   const btn = document.getElementById("btn-main");
@@ -4042,10 +4023,15 @@ function updatePlayUI() {
 
   if (isTeeingOff) {
     const isStart = currentRound.holes.every(h => !h.teePosition && !(h.shots && h.shots.length));
-    const handsAuto = currentRound.mode === "handsOff" && settings.autoMark;
-    if (handsAuto && !isStart) {
-      btn.textContent = "Auto teeing…";
-      btn.disabled = true;
+    if (currentRound.mode === "handsOff") {
+      if (isStart) {
+        btn.textContent = "Begin Round";
+        btn.disabled = false;
+      } else {
+        btn.textContent = "Auto teeing…";
+        btn.disabled = true;
+        maybeAutoTeeHandsOff();
+      }
     } else {
       btn.textContent = isStart ? "Begin Round" : "Tee Off";
       btn.disabled = false;
@@ -4140,9 +4126,9 @@ function mainAction() {
   }
 
   if (isTeeingOff) {
-    // Hands-off: Begin Round = silent tee + normal auto-mark (no club modal)
-    if (currentRound && currentRound.mode === "handsOff" && settings.autoMark) {
-      if (!autoTeeOffSilent()) showToast("Need GPS to begin at this tee");
+    // Hands-off: never open Tee Off modal — silent tee only
+    if (currentRound && currentRound.mode === "handsOff") {
+      if (!autoTeeOffSilent()) showToast("Need GPS (or a known tee) to begin");
       return;
     }
     openTeeModal();
@@ -7197,7 +7183,7 @@ function playTeeNearbyChime() {
   }
 }
 
-/** Walk-away confirm — GPS left the mark spot (before shot beeps). */
+/** Walk-away confirm chime — audio only; shot already marked on swing. */
 function playWalkAwayChime() {
   if (!settings.autoMark || !settings.markSound) return;
   ensureAudioCtx();
@@ -7362,13 +7348,21 @@ function hybridStageTitle() {
     return `SETTLING ${rem}s`;
   }
   if (stage === "armed") return "ARMED";
-  if (stage === "shot_triggered") {
-    const need = sens("markConfirmMoveM");
-    const away = metresFromMarkSpot();
-    const left = away == null ? need : Math.max(0, need - away);
-    return left > 0.05 ? `WALK ${left.toFixed(0)}m` : "MARKING…";
+  if (stage === "shot_triggered") return "MARKING…";
+  if (stage === "marked") {
+    if (hybridWalkChimeSpot && !hybridWalkChimeDone) {
+      const need = sens("markConfirmMoveM");
+      const away = hybridWalkChimeSpot && currentPosition
+        ? haversine(
+          hybridWalkChimeSpot.lat, hybridWalkChimeSpot.lon,
+          currentPosition.lat, currentPosition.lon
+        )
+        : null;
+      const left = away == null ? need : Math.max(0, need - away);
+      return left > 0.05 ? `MARKED · walk ${left.toFixed(0)}m` : "MARKED";
+    }
+    return "MARKED";
   }
-  if (stage === "marked") return "MARKED";
   return "WATCHING";
 }
 
@@ -7540,7 +7534,7 @@ function pushTestLog(type, data) {
   }
   // #endregion
   // Rate-limit hot types that previously blew the export to ~400KB
-  if (type === "mark_deferred" || type === "walk_confirm") {
+  if (type === "mark_deferred" || type === "walk_audio_confirm") {
     const key = "_last_" + type;
     if (pushTestLog[key] && _now - pushTestLog[key] < 2000) return;
     pushTestLog[key] = _now;
@@ -7939,6 +7933,10 @@ function noteMarkEvent(opts) {
   motionLoudSince = null;
   hybridStage = fromTee ? "watching" : "marked";
   hybridMarkedUntil = fromTee ? 0 : now + HYBRID_MARKED_FLASH_MS;
+  if (fromTee) {
+    hybridWalkChimeSpot = null;
+    hybridWalkChimeDone = false;
+  }
   settleTempoWasSettling = false;
   if (autoMarkWatching) ensureAutoMarkSettleTick();
   else stopAutoMarkSettleTick();
@@ -8267,54 +8265,15 @@ function updateHybridAutoMark() {
       hybridStage = "watching";
       lastToneLegend = "";
     }
+    maybeHybridWalkChime();
     tickSettleTempoAudio(cluster);
     updateAutoMarkCountdownUI();
     updateGpsDiagUI();
     return;
   }
 
-  // After swing: walk markConfirmMoveM from the spot, then mark immediately
-  if (hybridStage === "shot_triggered" && hybridMarkSpot) {
-    const away = metresFromMarkSpot();
-    const moveNeed = sens("markConfirmMoveM");
-    if (away != null && away >= moveNeed) {
-      // #region agent log
-      dbgAgentLog("H-C", "updateHybridAutoMark:walk", "walk_gate_hit", {
-        away: Math.round(away * 10) / 10,
-        moveNeed,
-        stage: hybridStage,
-        logLen: testPlayLog.length
-      });
-      // #endregion
-      // Prefer current GPS if you've walked farther from anchor than the swing spot
-      // (live Current Distance should match the marked shot).
-      let markAt = hybridMarkSpot;
-      const cur = getBestMarkPosition() || currentPosition;
-      if (cur && anchorPosition) {
-        const dSpot = haversine(anchorPosition.lat, anchorPosition.lon, hybridMarkSpot.lat, hybridMarkSpot.lon);
-        const dCur = haversine(anchorPosition.lat, anchorPosition.lon, cur.lat, cur.lon);
-        if (dCur > dSpot + 1) markAt = { lat: cur.lat, lon: cur.lon, accuracy: cur.accuracy };
-      }
-      pushTestLog("walk_confirm", {
-        away: Math.round(away * 10) / 10,
-        moveM: moveNeed,
-        markDist: anchorPosition && markAt
-          ? Math.round(haversine(anchorPosition.lat, anchorPosition.lon, markAt.lat, markAt.lon))
-          : null
-      });
-      commitHybridAutoMark(markAt, { afterWalk: true });
-      // #region agent log
-      dbgAgentLog("H-C", "updateHybridAutoMark:walk", "after_commit_walk", {
-        stage: hybridStage,
-        logLen: testPlayLog.length
-      });
-      // #endregion
-      tickSettleTempoAudio(cluster);
-      updateAutoMarkCountdownUI();
-      updateGpsDiagUI();
-      return;
-    }
-  }
+  // Walk-away after a mark: audio confirmation only (shot already registered on swing)
+  maybeHybridWalkChime();
 
   // Watching / settling — motion stop only; GPS just refines mark spot
   if (hybridStage === "watching" || hybridStage === "settling") {
@@ -8361,18 +8320,37 @@ function updateHybridAutoMark() {
     if (isSwingBurst() || motionPeakHold >= swingArmThreshold()) {
       hybridStage = "shot_triggered";
       hybridSwingAt = now;
-      const spot = pickHybridMarkSpot(cluster.centroid ? cluster : looseCluster);
+      const spot = pickHybridMarkSpot(cluster.centroid ? cluster : looseCluster) || hybridMarkSpot;
       if (spot) hybridMarkSpot = spot;
       playShotTriggeredTone();
-      setToneLegend(
-        `Shot seen — walk ${sens("markConfirmMoveM")} m`,
-        "shot_triggered",
-        {
+      // #region agent log
+      dbgAgentLog("H-SWING", "updateHybridAutoMark:armed", "swing_mark_now", {
+        hasSpot: !!hybridMarkSpot,
+        dist: hybridMarkSpot && anchorPosition
+          ? Math.round(haversine(
+            anchorPosition.lat, anchorPosition.lon,
+            hybridMarkSpot.lat, hybridMarkSpot.lon
+          ))
+          : null,
+        motionPeak: Math.round(motionPeakHold)
+      });
+      // #endregion
+      if (hybridMarkSpot) {
+        setToneLegend("Shot seen — marking", "shot_triggered", {
           motionPeak: Math.round(motionPeakHold),
-          mag: getMotionStats().mag,
-          moveM: sens("markConfirmMoveM")
-        }
-      );
+          mag: getMotionStats().mag
+        });
+        commitHybridAutoMark(hybridMarkSpot, { onSwing: true });
+      } else {
+        setToneLegend("Shot seen — no GPS spot", "shot_triggered", {
+          motionPeak: Math.round(motionPeakHold)
+        });
+        hybridStage = "watching";
+      }
+      tickSettleTempoAudio(cluster);
+      updateAutoMarkCountdownUI();
+      updateGpsDiagUI();
+      return;
     } else if (!stop.quiet) {
       hybridStage = "watching";
       hybridMarkSpot = null;
@@ -8387,9 +8365,29 @@ function updateHybridAutoMark() {
   updateGpsDiagUI();
 }
 
+function maybeHybridWalkChime() {
+  if (hybridWalkChimeDone || !hybridWalkChimeSpot || !currentPosition) return;
+  const away = haversine(
+    hybridWalkChimeSpot.lat, hybridWalkChimeSpot.lon,
+    currentPosition.lat, currentPosition.lon
+  );
+  const need = sens("markConfirmMoveM");
+  if (away < need) return;
+  hybridWalkChimeDone = true;
+  playWalkAwayChime();
+  pushTestLog("walk_audio_confirm", { away: Math.round(away * 10) / 10, moveM: need });
+  // #region agent log
+  dbgAgentLog("H-WALK", "maybeHybridWalkChime", "walk_audio_only", {
+    away: Math.round(away * 10) / 10,
+    moveM: need
+  });
+  // #endregion
+  updateAmStageUI();
+}
+
 function commitHybridAutoMark(centroid, opts) {
   opts = opts || {};
-  if (!autoMarkWatching || !currentRound || !anchorPosition || !centroid) return;
+  if (!autoMarkWatching || !currentRound || !anchorPosition || !centroid) return false;
   const to = {
     lat: centroid.lat,
     lon: centroid.lon,
@@ -8401,7 +8399,7 @@ function commitHybridAutoMark(centroid, opts) {
     ok: !!plaus.ok,
     reason: plaus.reason || null,
     dist: plaus.dist != null ? Math.round(plaus.dist * 10) / 10 : null,
-    afterWalk: !!opts.afterWalk,
+    onSwing: !!opts.onSwing,
     stage: hybridStage
   });
   // #endregion
@@ -8412,33 +8410,30 @@ function commitHybridAutoMark(centroid, opts) {
       playGpsDeferTone("unusual");
       resetHybridArm();
       updateAmStageUI();
-      return;
+      return false;
     }
     if (plaus.reason === "tooclose") {
-      // Walk-away already confirmed the swing — don't strand on min-shot distance
-      if (!opts.afterWalk) {
-        // #region agent log
-        dbgAgentLog("H-A", "commitHybridAutoMark", "mark_deferred_tooclose", {
-          dist: Math.round(plaus.dist),
-          logLen: testPlayLog.length
-        });
-        // #endregion
-        pushTestLog("mark_deferred", { reason: "tooclose", dist: Math.round(plaus.dist) });
-        return;
-      }
-      pushTestLog("mark_short_accepted", { dist: Math.round(plaus.dist), afterWalk: true });
-    } else {
+      // #region agent log
+      dbgAgentLog("H-A", "commitHybridAutoMark", "mark_deferred_tooclose", {
+        dist: Math.round(plaus.dist),
+        onSwing: !!opts.onSwing,
+        logLen: testPlayLog.length
+      });
+      // #endregion
+      pushTestLog("mark_deferred", { reason: "tooclose", dist: Math.round(plaus.dist) });
+      // Ignore near-tee / near-last-mark swings — do not save 0 m drives
       resetHybridArm();
       updateAmStageUI();
-      return;
+      return false;
     }
+    resetHybridArm();
+    updateAmStageUI();
+    return false;
   }
 
   const hole = currentRound.holes[currentHoleIndex];
   const from = { ...anchorPosition };
-  const dist = plaus.dist != null
-    ? plaus.dist
-    : haversine(from.lat, from.lon, to.lat, to.lon);
+  const dist = plaus.dist;
   const shotNum = hole.shots.length + 1;
 
   const clubInfo = resolveAutoShotClub(shotNum);
@@ -8467,7 +8462,10 @@ function commitHybridAutoMark(centroid, opts) {
     prevAnchor: from
   };
 
-  playWalkAwayChime();
+  // Arm walk-away chime only — shot is already registered
+  hybridWalkChimeSpot = { lat: to.lat, lon: to.lon };
+  hybridWalkChimeDone = false;
+
   playMarkBeeps(shotNum);
   noteMarkEvent();
   const clubBit = clubInfo.club || clubInfo.shotLabel || "shot";
@@ -8482,8 +8480,9 @@ function commitHybridAutoMark(centroid, opts) {
   lastGpsDeferReason = null;
   updatePlayUI();
   if (pocketLocked) updatePocketLockInfo();
-  showToast(`Auto-marked shot ${shotNum} · ${clubBit}`);
+  showToast(`Auto-marked shot ${shotNum} · ${Math.round(dist)} m · ${clubBit}`);
   recordTestEvent("auto_mark_shot");
+  return true;
 }
 
 function tryAutoMark() {
