@@ -1753,7 +1753,7 @@
   </div>
 
 <script>
-const APP_VERSION = "1.5.12";
+const APP_VERSION = "1.5.13";
 const PAGES_URL = "https://azzabazza11.github.io/golf-tracker/";
 const FEEDBACK_EMAIL = "aaron.callinan@gmail.com";
 const SUPPORT_URL = "https://ko-fi.com/aaroncallinan";
@@ -3771,6 +3771,112 @@ function findNearestTeeIndex(course, pos) {
   return best;
 }
 
+/** Most common club for this hole + shot number from past rounds (tee shot = 1). */
+function typicalClubForHole(courseId, holeIndex, shotNumber) {
+  const sn = Math.max(1, shotNumber || 1);
+  const counts = Object.create(null);
+  const list = roundsForCourse(courseId);
+  list.forEach(r => {
+    const h = r.holes && r.holes[holeIndex];
+    if (!h) return;
+    if (sn === 1) {
+      const c = (h.teePosition && h.teePosition.club) || (h.shots && h.shots[0] && h.shots[0].club);
+      if (c) counts[c] = (counts[c] || 0) + 1;
+    } else {
+      const shot = (h.shots || []).find(s => s.number === sn) || (h.shots || [])[sn - 1];
+      if (shot && shot.club) counts[shot.club] = (counts[shot.club] || 0) + 1;
+    }
+  });
+  let best = null;
+  let n = 0;
+  Object.keys(counts).forEach(c => {
+    if (counts[c] > n) {
+      n = counts[c];
+      best = c;
+    }
+  });
+  return best;
+}
+
+function resolveAutoShotClub(shotNumber) {
+  if (!currentRound) {
+    return { club: null, clubGuess: false, shotLabel: "Shot taken" };
+  }
+  const typical = typicalClubForHole(currentRound.courseId, currentHoleIndex, shotNumber);
+  if (typical) return { club: typical, clubGuess: true, shotLabel: null };
+  if (shotNumber === 1) return { club: null, clubGuess: false, shotLabel: "Tee shot" };
+  return { club: null, clubGuess: false, shotLabel: "Walking to ball" };
+}
+
+function shotClubDisplayHtml(s) {
+  if (s.club) {
+    const guess = s.clubGuess ? ' <span class="club-missing">(typical)</span>' : "";
+    return escapeHtml(s.club) + guess;
+  }
+  if (s.shotLabel) return `<span class="club-missing">${escapeHtml(s.shotLabel)}</span>`;
+  return `<span class="club-missing">${s.auto ? "auto · tap club" : "tap club"}</span>`;
+}
+
+function shotClubPlain(s) {
+  if (s.club) return s.club + (s.clubGuess ? " (typical)" : "");
+  if (s.shotLabel) return s.shotLabel;
+  return s.auto ? "auto" : "—";
+}
+
+function roundAwaitingFirstTee() {
+  return !!(currentRound && isTeeingOff &&
+    currentRound.holes.every(h => !h.teePosition && !(h.shots && h.shots.length)));
+}
+
+/** Hands-off: keep current hole = nearest known tee until Begin Round / auto tee. */
+function maybeUpdateNearestHoleWhileWaiting() {
+  if (!currentRound || currentRound.mode !== "handsOff") return;
+  if (!roundAwaitingFirstTee()) return;
+  const pos = currentPosition;
+  if (!pos || !currentCourse) return;
+  const nearest = findNearestTeeIndex(currentCourse, pos);
+  if (!nearest) return;
+
+  if (nearest.index !== currentHoleIndex) {
+    const curTee = knownTeeForHole(
+      currentRound.courseId,
+      currentHoleIndex,
+      currentRound.holes[currentHoleIndex]
+    );
+    if (curTee) {
+      const dCur = haversine(pos.lat, pos.lon, curTee.lat, curTee.lon);
+      // Need a clearer nearer tee before switching (GPS noise)
+      if (nearest.dist > dCur - 10) {
+        updateWaitingTeeHint(nearest);
+        return;
+      }
+    }
+    currentHoleIndex = nearest.index;
+    beginTeeChimedHole = null;
+    resetTeeHandoffState();
+    pushTestLog("nearest_hole", {
+      hole: currentHoleIndex + 1,
+      dist: Math.round(nearest.dist)
+    });
+    updatePlayUI();
+    return;
+  }
+  updateWaitingTeeHint(nearest);
+}
+
+function updateWaitingTeeHint(nearest) {
+  const clubEl = document.getElementById("current-club-display");
+  if (!clubEl || !currentRound || !isTeeingOff) return;
+  const hole = currentRound.holes[currentHoleIndex];
+  const typical = typicalClubForHole(currentRound.courseId, currentHoleIndex, 1);
+  const distBit = nearest && Number.isFinite(nearest.dist)
+    ? ` · ${Math.round(nearest.dist)} m to tee`
+    : "";
+  clubEl.textContent = typical
+    ? `Hole ${hole.holeNumber}${distBit} · typical ${typical}`
+    : `Hole ${hole.holeNumber}${distBit} · waiting to begin`;
+}
+
 function courseCentroid(course) {
   const pts = [];
   (course.holes || []).forEach((_, i) => {
@@ -3864,9 +3970,7 @@ function updatePlayUI() {
     list.innerHTML = `<li style="color:var(--muted)">No shots yet</li>`;
   } else {
     list.innerHTML = hole.shots.map((s, idx) => {
-      const clubLabel = s.club
-        ? escapeHtml(s.club)
-        : `<span class="club-missing">${s.auto ? "auto · tap club" : "tap club"}</span>`;
+      const clubLabel = shotClubDisplayHtml(s);
       return `<li class="editable" onclick="openClubEditLive(${idx})">
         <span>Shot ${s.number} · ${clubLabel}${s.auto ? " · auto" : ""}</span>
         <strong>${Math.round(s.distance)} m</strong>
@@ -3902,10 +4006,24 @@ function updatePlayUI() {
 
   const clubEl = document.getElementById("current-club-display");
   if (clubEl) {
-    if (isTeeingOff) clubEl.textContent = "";
-    else if (clubForCurrentShot) clubEl.textContent = "Selected club: " + clubForCurrentShot;
-    else if (settings.autoMark) clubEl.textContent = "Clubs: assign later (tap shots)";
-    else clubEl.textContent = "";
+    if (isTeeingOff && currentRound && currentRound.mode === "handsOff" && roundAwaitingFirstTee()) {
+      const nearest = currentPosition && currentCourse
+        ? findNearestTeeIndex(currentCourse, currentPosition)
+        : null;
+      updateWaitingTeeHint(nearest || { dist: null });
+    } else if (isTeeingOff) {
+      clubEl.textContent = "";
+    } else if (clubForCurrentShot) {
+      clubEl.textContent = "Selected club: " + clubForCurrentShot;
+    } else if (settings.autoMark) {
+      const nextN = (hole.shots.length || 0) + 1;
+      const typical = typicalClubForHole(currentRound.courseId, currentHoleIndex, nextN);
+      clubEl.textContent = typical
+        ? `Typical next: ${typical} · auto-mark watching`
+        : "Auto-mark watching · club after shot";
+    } else {
+      clubEl.textContent = "";
+    }
   }
 
   const amStatus = document.getElementById("auto-mark-status");
@@ -3955,6 +4073,11 @@ function mainAction() {
   }
 
   if (isTeeingOff) {
+    // Hands-off: Begin Round = silent tee + normal auto-mark (no club modal)
+    if (currentRound && currentRound.mode === "handsOff" && settings.autoMark) {
+      if (!autoTeeOffSilent()) showToast("Need GPS to begin at this tee");
+      return;
+    }
     openTeeModal();
     return;
   }
@@ -4421,6 +4544,7 @@ function applyMockPosition(pos) {
   ingestGpsFix(pos);
   recordWalkPoint(pos);
   updateTeeHandoffTracking(pos);
+  maybeUpdateNearestHoleWhileWaiting();
   maybeBeginTeeChime();
   const status = document.getElementById("gps-status");
   status.textContent = `Mock GPS (±${Math.round(pos.accuracy || 5)} m)`;
@@ -4509,6 +4633,7 @@ function startGPS() {
       ingestGpsFix(raw);
       recordWalkPoint(currentPosition);
       updateTeeHandoffTracking(currentPosition);
+      maybeUpdateNearestHoleWhileWaiting();
       maybeBeginTeeChime();
       const status = document.getElementById("gps-status");
 
@@ -6722,7 +6847,14 @@ function updatePocketLockInfo() {
   }
   const clubEl = document.getElementById("pocket-lock-club");
   if (clubEl) {
-    clubEl.textContent = clubForCurrentShot ? ("Selected club: " + clubForCurrentShot) : "";
+    if (clubForCurrentShot) clubEl.textContent = "Selected club: " + clubForCurrentShot;
+    else if (settings.autoMark && hole) {
+      const nextN = (hole.shots.length || 0) + 1;
+      const typical = typicalClubForHole(currentRound.courseId, currentHoleIndex, nextN);
+      clubEl.textContent = typical ? ("Typical next: " + typical) : "";
+    } else {
+      clubEl.textContent = "";
+    }
   }
   const shotsEl = document.getElementById("pocket-lock-shots");
   if (shotsEl) {
@@ -6730,7 +6862,7 @@ function updatePocketLockInfo() {
       shotsEl.innerHTML = "";
     } else {
       shotsEl.innerHTML = hole.shots.map(s => {
-        const club = s.club ? ` · ${escapeHtml(s.club)}` : "";
+        const club = ` · ${escapeHtml(shotClubPlain(s))}`;
         const dist = typeof s.distance === "number" ? `${Math.round(s.distance)} m` : "—";
         return `<div class="pocket-shot-row"><span>#${s.number}${club}</span><strong>${dist}</strong></div>`;
       }).join("");
@@ -7612,17 +7744,19 @@ function autoTeeOffSilent() {
   const pos = getBestMarkPosition() || currentPosition || known;
   if (!pos) return false;
 
+  const typical = typicalClubForHole(currentRound.courseId, currentHoleIndex, 1);
   hole.teePosition = {
     lat: pos.lat,
     lon: pos.lon,
     accuracy: pos.accuracy || null,
-    club: null,
+    club: typical || null,
     at: new Date().toISOString(),
     auto: true
   };
   anchorPosition = { lat: pos.lat, lon: pos.lon };
-  clubForCurrentShot = null;
-  hole.nextClub = null;
+  // Typical club is a hint until the swing marks — auto-mark runs normally from here
+  clubForCurrentShot = typical || null;
+  hole.nextClub = typical || null;
   isTeeingOff = false;
   noteMarkEvent();
   resetTeeHandoffState();
@@ -7632,7 +7766,10 @@ function autoTeeOffSilent() {
   startAutoMarkWatch();
   updatePlayUI();
   if (pocketLocked) updatePocketLockInfo();
-  showToast(`Hole ${hole.holeNumber} · auto tee`);
+  showToast(typical
+    ? `Hole ${hole.holeNumber} · auto tee · typical ${typical}`
+    : `Hole ${hole.holeNumber} · auto tee · watching for swing`);
+  pushTestLog("auto_tee", { hole: hole.holeNumber, typical: typical || null });
   return true;
 }
 
@@ -8192,10 +8329,13 @@ function commitHybridAutoMark(centroid) {
   const dist = plaus.dist;
   const shotNum = hole.shots.length + 1;
 
+  const clubInfo = resolveAutoShotClub(shotNum);
   hole.shots.push({
     number: shotNum,
     distance: dist,
-    club: null,
+    club: clubInfo.club,
+    clubGuess: !!clubInfo.clubGuess,
+    shotLabel: clubInfo.shotLabel || null,
     from,
     to,
     auto: true,
@@ -8205,8 +8345,9 @@ function commitHybridAutoMark(centroid) {
   if (shotNum === 1) recordDrive(from, to);
 
   anchorPosition = { lat: to.lat, lon: to.lon };
-  clubForCurrentShot = null;
-  hole.nextClub = null;
+  const nextTypical = typicalClubForHole(currentRound.courseId, currentHoleIndex, shotNum + 1);
+  clubForCurrentShot = nextTypical || null;
+  hole.nextClub = nextTypical || null;
 
   lastAutoUndo = {
     holeIndex: currentHoleIndex,
@@ -8217,16 +8358,19 @@ function commitHybridAutoMark(centroid) {
   playWalkAwayChime();
   playMarkBeeps(shotNum);
   noteMarkEvent();
-  setToneLegend("Marked shot " + shotNum, "auto_mark_shot", {
+  const clubBit = clubInfo.club || clubInfo.shotLabel || "shot";
+  setToneLegend("Marked shot " + shotNum + " · " + clubBit, "auto_mark_shot", {
     shotNum,
     distance: Math.round(dist),
-    motionPeak: Math.round(motionPeakHold)
+    motionPeak: Math.round(motionPeakHold),
+    club: clubInfo.club,
+    shotLabel: clubInfo.shotLabel
   });
   showAutoUndo();
   lastGpsDeferReason = null;
   updatePlayUI();
   if (pocketLocked) updatePocketLockInfo();
-  showToast(`Auto-marked shot ${shotNum}`);
+  showToast(`Auto-marked shot ${shotNum} · ${clubBit}`);
   recordTestEvent("auto_mark_shot");
 }
 
