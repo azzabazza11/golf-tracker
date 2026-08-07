@@ -1931,7 +1931,7 @@
   </div>
 
 <script>
-const APP_VERSION = "1.5.29";
+const APP_VERSION = "1.5.30";
 const PAGES_URL = "https://azzabazza11.github.io/golf-tracker/";
 const FEEDBACK_EMAIL = "aaron.callinan@gmail.com";
 const SUPPORT_URL = "https://ko-fi.com/aaroncallinan";
@@ -2083,7 +2083,7 @@ const SENSITIVITY_RANGES = {
   greenTapFloor: { min: 2, max: 15, step: 0.5, label: "Tap: min magnitude" },
   greenTapImpulseMs: { min: 20, max: 400, step: 5, label: "Tap: max impulse (ms)" },
   greenTapRefractoryMs: { min: 80, max: 2000, step: 10, label: "Tap: min gap between counts (ms)" },
-  greenTapWindowMs: { min: 1200, max: 5000, step: 100, label: "Tap: max window for 3 counts (ms)" }
+  greenTapWindowMs: { min: 300, max: 5000, step: 50, label: "Tap: max window for 3 counts (ms)" }
 };
 
 // Safe storage load — never reference `courses`/`rounds` inside this helper (avoids TDZ)
