@@ -1753,7 +1753,7 @@
   </div>
 
 <script>
-const APP_VERSION = "1.5.14";
+const APP_VERSION = "1.5.15";
 const PAGES_URL = "https://azzabazza11.github.io/golf-tracker/";
 const FEEDBACK_EMAIL = "aaron.callinan@gmail.com";
 const SUPPORT_URL = "https://ko-fi.com/aaroncallinan";
@@ -1998,6 +1998,7 @@ let motionBuf = [];
 let lastMotionMag = null;
 let settleSince = null;
 let autoMarkCooldownUntil = 0;
+let lastSwingBlockedLogAt = 0;
 let autoMarkSettleTick = null;
 let lastAutoUndo = null;
 let undoHideTimer = null;
@@ -4124,7 +4125,7 @@ function confirmTeeOff() {
   isTeeingOff = false;
   selectedClub = null;
   closeModal();
-  noteMarkEvent();
+  noteMarkEvent({ fromTee: true });
   resetTeeHandoffState();
   lastNearPinPos = null;
   lastPosBeforeNextTee = null;
@@ -7768,7 +7769,7 @@ function autoTeeOffSilent() {
   clubForCurrentShot = typical || null;
   hole.nextClub = typical || null;
   isTeeingOff = false;
-  noteMarkEvent();
+  noteMarkEvent({ fromTee: true });
   resetTeeHandoffState();
   beginTeeChimedHole = currentHoleIndex;
   lastNearPinPos = null;
@@ -7830,16 +7831,24 @@ function median(nums) {
   return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2;
 }
 
-function noteMarkEvent() {
+function noteMarkEvent(opts) {
+  opts = opts || {};
+  const fromTee = !!opts.fromTee;
   const now = Date.now();
-  if (lastMarkAt > 0) {
-    const dt = now - lastMarkAt;
-    if (dt > 20000 && dt < 20 * 60 * 1000) {
-      autoMarkIntervals.push(dt);
-      if (autoMarkIntervals.length > 8) autoMarkIntervals = autoMarkIntervals.slice(-8);
+  // Tee-off is not a shot mark — don't start min-interval / cooldown that blocks the first swing
+  if (!fromTee) {
+    if (lastMarkAt > 0) {
+      const dt = now - lastMarkAt;
+      if (dt > 20000 && dt < 20 * 60 * 1000) {
+        autoMarkIntervals.push(dt);
+        if (autoMarkIntervals.length > 8) autoMarkIntervals = autoMarkIntervals.slice(-8);
+      }
     }
+    lastMarkAt = now;
+    autoMarkCooldownUntil = now + 8000;
+  } else {
+    autoMarkCooldownUntil = 0;
   }
-  lastMarkAt = now;
   settleSince = null;
   hybridMarkSpot = null;
   hybridArmedAt = 0;
@@ -7847,10 +7856,9 @@ function noteMarkEvent() {
   hybridConfirmAt = 0;
   motionQuietSince = null;
   motionLoudSince = null;
-  hybridStage = "marked";
-  hybridMarkedUntil = now + HYBRID_MARKED_FLASH_MS;
+  hybridStage = fromTee ? "watching" : "marked";
+  hybridMarkedUntil = fromTee ? 0 : now + HYBRID_MARKED_FLASH_MS;
   settleTempoWasSettling = false;
-  autoMarkCooldownUntil = now + 8000;
   if (autoMarkWatching) ensureAutoMarkSettleTick();
   else stopAutoMarkSettleTick();
   updateAutoMarkCountdownUI();
@@ -8218,8 +8226,11 @@ function updateHybridAutoMark() {
     }
   }
 
-  // Cooldown / min-interval only block a NEW swing trigger — settling must always run
-  const blockNewSwing = (now < autoMarkCooldownUntil) || (now - lastMarkAt < minAutoMarkIntervalMs());
+  // Cooldown / min-interval only block a NEW swing trigger — settling must always run.
+  // Tee-off is not a shot: first swing on a hole is never blocked by mark interval.
+  const holeShots = (currentRound.holes[currentHoleIndex].shots || []).length;
+  const intervalBlock = holeShots > 0 && lastMarkAt > 0 && (now - lastMarkAt < minAutoMarkIntervalMs());
+  const blockNewSwing = (now < autoMarkCooldownUntil) || intervalBlock;
 
   // Watching / settling — motion stop only; GPS just refines mark spot
   if (hybridStage === "watching" || hybridStage === "settling") {
@@ -8263,9 +8274,28 @@ function updateHybridAutoMark() {
       const spot = pickHybridMarkSpot(cluster.settled && cluster.centroid ? cluster : looseCluster);
       if (spot) hybridMarkSpot = spot;
     }
+    const swinging = isSwingBurst() || motionPeakHold >= swingArmThreshold();
     if (blockNewSwing) {
-      // Stay armed; ignore swings until cooldown/interval clears
-    } else if (isSwingBurst() || motionPeakHold >= swingArmThreshold()) {
+      if (swinging) {
+        const coolLeft = Math.max(0, autoMarkCooldownUntil - now);
+        const intLeft = intervalBlock ? Math.max(0, minAutoMarkIntervalMs() - (now - lastMarkAt)) : 0;
+        if (now - lastSwingBlockedLogAt > 1500) {
+          lastSwingBlockedLogAt = now;
+          pushTestLog("swing_blocked", {
+            coolLeftMs: coolLeft,
+            intervalLeftMs: intLeft,
+            holeShots,
+            motionPeak: Math.round(motionPeakHold)
+          });
+        }
+      } else if (!stop.quiet) {
+        hybridStage = "watching";
+        hybridMarkSpot = null;
+        hybridArmedAt = 0;
+        lastToneLegend = "";
+        pushTestLog("stage_watching", { reason: "leave_while_blocked", motionPeak: Math.round(motionPeakHold) });
+      }
+    } else if (swinging) {
       hybridStage = "shot_triggered";
       hybridSwingAt = now;
       hybridConfirmAt = 0;
