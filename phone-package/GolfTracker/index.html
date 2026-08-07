@@ -1930,7 +1930,7 @@
   </div>
 
 <script>
-const APP_VERSION = "1.5.27";
+const APP_VERSION = "1.5.28";
 const PAGES_URL = "https://azzabazza11.github.io/golf-tracker/";
 const FEEDBACK_EMAIL = "aaron.callinan@gmail.com";
 const SUPPORT_URL = "https://ko-fi.com/aaroncallinan";
@@ -2081,8 +2081,8 @@ const SENSITIVITY_RANGES = {
   greenTapDelta: { min: 1, max: 8, step: 0.1, label: "Tap: above baseline +" },
   greenTapFloor: { min: 2, max: 15, step: 0.5, label: "Tap: min magnitude" },
   greenTapImpulseMs: { min: 20, max: 400, step: 5, label: "Tap: max impulse (ms)" },
-  greenTapRefractoryMs: { min: 200, max: 1200, step: 50, label: "Tap: gap between counts (ms)" },
-  greenTapWindowMs: { min: 1200, max: 5000, step: 100, label: "Tap: window for 3 counts (ms)" }
+  greenTapRefractoryMs: { min: 200, max: 2000, step: 50, label: "Tap: min gap between counts (ms)" },
+  greenTapWindowMs: { min: 1200, max: 5000, step: 100, label: "Tap: max window for 3 counts (ms)" }
 };
 
 // Safe storage load — never reference `courses`/`rounds` inside this helper (avoids TDZ)
@@ -9037,11 +9037,13 @@ function onDeviceMotion(ev) {
   greenTapNearPin = true;
   updateGreenZoneUI();
   if (now < greenTapArmUntil) {
+    if (pruneGreenTapWindow(now)) updateGreenZoneUI();
     greenTapBumpCount = greenTapTimes.length;
     updateAmStageUI();
     return;
   }
   if (gEval.kind === "shake") {
+    pruneGreenTapWindow(now);
     pushTestLog("green_tap_shake", {
       dur: gEval.dur,
       peak: Math.round(gEval.peak * 10) / 10,
@@ -9051,20 +9053,22 @@ function onDeviceMotion(ev) {
     return;
   }
   if (gEval.kind !== "tap") {
+    if (pruneGreenTapWindow(now)) updateGreenZoneUI();
     greenTapBumpCount = greenTapTimes.length;
     updateAmStageUI();
     return;
   }
-  const refractory = sens("greenTapRefractoryMs") || GREEN_TAP_REFRACTORY_MS;
-  if (now - lastGreenTapCountedAt < refractory) {
+  const waitMs = greenTapRefractoryRemainingMs(now);
+  if (waitMs > 0) {
+    pruneGreenTapWindow(now);
     greenTapBumpCount = greenTapTimes.length;
+    pushTestLog("green_tap_gap", { waitMs: Math.round(waitMs), gap: greenTapRefractoryLimitMs() });
     updateAmStageUI();
     return;
   }
   lastGreenTapCountedAt = now;
   greenTapTimes.push(now);
-  const windowMs = sens("greenTapWindowMs") || GREEN_TAP_WINDOW_MS;
-  greenTapTimes = greenTapTimes.filter(t => now - t < windowMs);
+  pruneGreenTapWindow(now);
   greenTapBumpCount = greenTapTimes.length;
   pushTestLog("green_tap_bump", {
     count: greenTapBumpCount,
@@ -9076,7 +9080,8 @@ function onDeviceMotion(ev) {
     )),
     mag: Math.round(gEval.peak * 10) / 10,
     dur: gEval.dur,
-    thresh: Math.round(gEval.thresh * 10) / 10
+    thresh: Math.round(gEval.thresh * 10) / 10,
+    gap: greenTapRefractoryLimitMs()
   });
   updateAmStageUI();
   updateGreenZoneUI();
@@ -9093,6 +9098,34 @@ function greenTapMotionMean() {
   if (motionBuf.length < 3) return null;
   const vals = motionBuf.map(s => s.m);
   return vals.reduce((a, b) => a + b, 0) / vals.length;
+}
+
+function greenTapRefractoryLimitMs() {
+  const v = sens("greenTapRefractoryMs");
+  return Number.isFinite(v) ? v : GREEN_TAP_REFRACTORY_MS;
+}
+
+function greenTapWindowLimitMs() {
+  const v = sens("greenTapWindowMs");
+  return Number.isFinite(v) ? v : GREEN_TAP_WINDOW_MS;
+}
+
+/** Drop taps older than the 3-count window. Returns true if count changed. */
+function pruneGreenTapWindow(now) {
+  now = now || Date.now();
+  const before = greenTapTimes.length;
+  const windowMs = greenTapWindowLimitMs();
+  greenTapTimes = greenTapTimes.filter(t => now - t < windowMs);
+  greenTapBumpCount = greenTapTimes.length;
+  return greenTapTimes.length !== before;
+}
+
+function greenTapRefractoryRemainingMs(now) {
+  now = now || Date.now();
+  const gap = greenTapRefractoryLimitMs();
+  const elapsed = now - lastGreenTapCountedAt;
+  if (lastGreenTapCountedAt <= 0 || elapsed >= gap) return 0;
+  return gap - elapsed;
 }
 
 /** Rising/falling edge impulse classifier — tap vs sustained shake. */
@@ -9149,6 +9182,7 @@ function openGreenTapCalib() {
   greenTapCalibShakes = 0;
   greenTapTimes = [];
   greenTapBumpCount = 0;
+  lastGreenTapCountedAt = 0;
   greenTapSpikeActive = false;
   renderGreenTapCalibSliders();
   updateGreenTapCalibUI({ kind: "none", mag: 0, mean: 0, thresh: sens("greenTapFloor"), peak: 0, dur: 0 });
@@ -9157,6 +9191,8 @@ function openGreenTapCalib() {
     flash.textContent = "Ready — tap the phone";
     flash.style.color = "var(--accent)";
   }
+  const c = document.getElementById("gtc-count");
+  if (c) c.textContent = "0";
   document.getElementById("modal-green-tap-calib").classList.add("active");
   startMotionDiagListener();
   ensureAudioCtx();
@@ -9181,6 +9217,7 @@ function resetGreenTapCalibCounts() {
   greenTapCalibShakes = 0;
   greenTapTimes = [];
   greenTapBumpCount = 0;
+  lastGreenTapCountedAt = 0;
   const c = document.getElementById("gtc-count");
   if (c) c.textContent = "0";
   const t = document.getElementById("gtc-taps");
@@ -9230,14 +9267,33 @@ function onGreenTapCalibSlider(key, value) {
 }
 
 function updateGreenTapCalibUI(ev) {
+  const now = Date.now();
+  const had = greenTapBumpCount;
+  if (pruneGreenTapWindow(now) && had > 0 && greenTapBumpCount === 0) {
+    const c = document.getElementById("gtc-count");
+    if (c) c.textContent = "0";
+    if (now >= greenTapCalibFlashUntil) {
+      const flash = document.getElementById("gtc-flash");
+      if (flash) {
+        flash.textContent = "Window elapsed — count reset";
+        flash.style.color = "var(--muted)";
+      }
+    }
+  } else if (had !== greenTapBumpCount) {
+    const c = document.getElementById("gtc-count");
+    if (c) c.textContent = String(greenTapBumpCount);
+  }
+
   const magEl = document.getElementById("gtc-mag");
   const stats = document.getElementById("gtc-stats");
   const bar = document.getElementById("gtc-bar");
   if (magEl) magEl.textContent = (Math.round(ev.mag * 10) / 10).toFixed(1);
   if (stats) {
+    const gapLeft = greenTapRefractoryRemainingMs(now);
     stats.textContent =
       `baseline ${ev.mean.toFixed(1)} · thresh ${ev.thresh.toFixed(1)} · peak ${ev.peak.toFixed(1)}` +
-      (ev.above ? ` · spike ${ev.dur} ms` : "");
+      (ev.above ? ` · spike ${ev.dur} ms` : "") +
+      (gapLeft > 0 ? ` · gap ${Math.ceil(gapLeft)} ms` : "");
   }
   if (bar) {
     const pct = Math.min(100, (ev.mag / Math.max(ev.thresh * 2, 12)) * 100);
@@ -9246,14 +9302,30 @@ function updateGreenTapCalibUI(ev) {
       ? (ev.dur > sens("greenTapImpulseMs") ? "#e67e22" : "var(--accent)")
       : "var(--accent)";
   }
-  if (Date.now() < greenTapCalibFlashUntil) return;
+  if (now < greenTapCalibFlashUntil) return;
 }
 
 function registerGreenTapCalibEvent(ev) {
+  const now = Date.now();
+  const waitMs = greenTapRefractoryRemainingMs(now);
+  if (waitMs > 0) {
+    const flash = document.getElementById("gtc-flash");
+    if (flash) {
+      flash.textContent = `TOO SOON · wait ${Math.ceil(waitMs)} ms (min gap ${greenTapRefractoryLimitMs()} ms)`;
+      flash.style.color = "#e67e22";
+    }
+    greenTapCalibFlashUntil = now + 350;
+    const last = document.getElementById("gtc-last");
+    if (last) {
+      last.textContent = `Ignored (gap) · peak ${ev.peak.toFixed(1)} · ${ev.dur} ms`;
+    }
+    return;
+  }
+
   greenTapCalibTaps++;
-  greenTapTimes.push(Date.now());
-  const windowMs = sens("greenTapWindowMs") || GREEN_TAP_WINDOW_MS;
-  greenTapTimes = greenTapTimes.filter(t => Date.now() - t < windowMs);
+  lastGreenTapCountedAt = now;
+  greenTapTimes.push(now);
+  pruneGreenTapWindow(now);
   greenTapBumpCount = greenTapTimes.length;
   const c = document.getElementById("gtc-count");
   if (c) c.textContent = String(greenTapBumpCount);
@@ -9268,7 +9340,7 @@ function registerGreenTapCalibEvent(ev) {
     flash.textContent = greenTapBumpCount >= GREEN_TAP_COUNT ? "PUTT WOULD MARK" : `TAP ${greenTapBumpCount}/${GREEN_TAP_COUNT}`;
     flash.style.color = greenTapBumpCount >= GREEN_TAP_COUNT ? "#1e8449" : "var(--accent)";
   }
-  greenTapCalibFlashUntil = Date.now() + 450;
+  greenTapCalibFlashUntil = now + 450;
   if (settings.markSound) {
     try {
       ensureAudioCtx();
@@ -9290,6 +9362,7 @@ function registerGreenTapCalibEvent(ev) {
   if (greenTapBumpCount >= GREEN_TAP_COUNT) {
     greenTapTimes = [];
     greenTapBumpCount = 0;
+    lastGreenTapCountedAt = now;
   }
 }
 
