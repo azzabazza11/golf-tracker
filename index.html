@@ -522,6 +522,16 @@
     .map-legend .leg-pin::before { background: #2ecc71; }
     .map-legend .leg-walk::before { background: #3498db; }
     .map-legend .leg-you::before { background: #3498db; box-shadow: 0 0 0 3px rgba(52,152,219,0.35); }
+    .map-legend .leg-tee-zone::before {
+      background: transparent;
+      border: 2px solid rgba(255,255,255,0.85);
+      box-sizing: border-box;
+    }
+    .map-legend .leg-green-zone::before {
+      background: rgba(46,204,113,0.25);
+      border: 2px solid #2ecc71;
+      box-sizing: border-box;
+    }
 
     #review-content.review-slide-from-left {
       animation: reviewInFromLeft 0.22s ease-out;
@@ -726,6 +736,19 @@
       line-height: 1.35;
     }
     #am-tone-line.show { display: block; }
+    #green-zone-line {
+      display: none;
+      margin-top: 8px;
+      font-size: 12px;
+      line-height: 1.35;
+      color: var(--muted);
+      font-weight: 500;
+    }
+    #green-zone-line.show { display: block; }
+    #green-zone-line.in-zone {
+      color: #1e8449;
+      font-weight: 700;
+    }
     .sens-presets {
       display: flex;
       gap: 8px;
@@ -1237,13 +1260,14 @@
       <div class="setting-row">
         <div class="setting-text">
           <strong>Green tap putts</strong>
-          <span>Near the pin (on-green radius), hybrid auto-mark pauses — tap/shake ~3× to mark a putt instead.</span>
+          <span>Near the pin (on-green radius), hybrid pauses — short impulse taps ×3 mark a putt (not shakes).</span>
         </div>
         <label class="switch">
           <input type="checkbox" id="setting-green-tap" onchange="onGreenTapToggle(this.checked)">
           <span class="slider"></span>
         </label>
       </div>
+      <button type="button" class="btn-secondary" style="width:100%;margin-top:4px;margin-bottom:8px" onclick="openGreenTapCalib()">Calibrate green taps</button>
       <div class="setting-row">
         <div class="setting-text">
           <strong>Voice chimes (stub)</strong>
@@ -1259,7 +1283,7 @@
     <details class="card settings-acc" id="sensitivity-card">
       <summary class="settings-acc-summary">Auto-mark sensitivity</summary>
       <div class="settings-acc-body">
-        <p class="modal-note" style="margin-bottom:8px">Motion stop peak + hold time arm the shot. A swing marks immediately at that spot; walking away only plays a confirm chime. On green with green-tap on, hybrid pauses. On-green radius expands by GPS accuracy (so 3 m still works with ±GPS).</p>
+        <p class="modal-note" style="margin-bottom:8px">Motion stop peak + hold time arm the shot. A swing marks immediately at that spot; walking away only plays a confirm chime. On-green radius is exact (no GPS padding) so chips ~5 m from the pin stay outside tap zone. Map shows tee/green circles to scale.</p>
         <div class="sens-presets" id="sens-presets">
           <button type="button" data-preset="strict" onclick="applySensPreset('strict')">Strict</button>
           <button type="button" data-preset="balanced" onclick="applySensPreset('balanced')">Balanced</button>
@@ -1513,6 +1537,7 @@
       <div class="status" id="drive-stability-display" style="margin-top:6px"></div>
       <div class="status warn" id="auto-mark-status"></div>
       <div class="status" id="gps-diag-line" style="display:none;margin-top:6px;font-size:12px;line-height:1.35"></div>
+      <div id="green-zone-line"></div>
       <div id="am-stage-line"></div>
       <div id="am-tone-line"></div>
       <div id="auto-mark-countdown" class="am-countdown" aria-hidden="true" title="Auto-mark countdown">
@@ -1709,6 +1734,8 @@
         <span class="leg-tee">Tee</span>
         <span class="leg-shot">Shot</span>
         <span class="leg-pin">Green / pin</span>
+        <span class="leg-tee-zone">Tee near</span>
+        <span class="leg-green-zone">Green tap</span>
         <span class="leg-walk">Walk</span>
         <span class="leg-you" id="map-leg-you" style="display:none">You</span>
       </div>
@@ -1729,6 +1756,35 @@
         <button type="button" class="btn-primary" onclick="confirmMapImageScope('course')">All holes</button>
       </div>
       <button type="button" class="btn-secondary" style="width:100%;margin-top:10px" onclick="cancelMapImageScope()">Cancel</button>
+    </div>
+  </div>
+
+  <!-- MODAL: Green tap calibration -->
+  <div id="modal-green-tap-calib" class="modal">
+    <div class="modal-content" style="max-height:90vh;overflow:auto">
+      <h3 style="margin-bottom:8px">Green tap calibration</h3>
+      <p class="modal-note" style="margin-bottom:10px">
+        Practice taps on the phone (no GPS needed). Valid taps are short <strong>impulses</strong>; sustained shaking is rejected. Tune until taps count and shakes don’t.
+      </p>
+      <div id="gtc-flash" style="text-align:center;font-size:22px;font-weight:700;min-height:36px;margin:8px 0;color:var(--accent)">Ready</div>
+      <div class="card" style="margin:0 0 12px;padding:12px">
+        <div style="font-size:13px;color:var(--muted)">Live motion</div>
+        <div style="font-size:28px;font-weight:700;margin:4px 0"><span id="gtc-mag">—</span></div>
+        <div style="font-size:12px;line-height:1.45;color:var(--muted)" id="gtc-stats">baseline — · thresh — · peak —</div>
+        <div style="margin-top:10px;height:10px;border-radius:6px;background:var(--border);overflow:hidden">
+          <div id="gtc-bar" style="height:100%;width:0%;background:var(--accent);transition:width 40ms linear"></div>
+        </div>
+        <div style="margin-top:12px;font-size:15px;font-weight:600">Counts: <span id="gtc-count">0</span> / 3</div>
+        <div style="font-size:12px;color:var(--muted);margin-top:4px">Taps <span id="gtc-taps">0</span> · Shakes rejected <span id="gtc-shakes">0</span></div>
+        <div id="gtc-last" style="font-size:12px;margin-top:8px;line-height:1.4;color:var(--muted)">Last: —</div>
+      </div>
+      <div id="gtc-sliders"></div>
+      <div class="row" style="margin-top:14px;gap:8px">
+        <button type="button" class="btn-secondary" style="flex:1" onclick="resetGreenTapCalibCounts()">Reset counts</button>
+        <button type="button" class="btn-secondary" style="flex:1" onclick="applyGreenTapCalibPreset('strict')">Strict</button>
+        <button type="button" class="btn-secondary" style="flex:1" onclick="applyGreenTapCalibPreset('forgiving')">Forgiving</button>
+      </div>
+      <button type="button" class="btn-primary" style="width:100%;margin-top:12px" onclick="closeGreenTapCalib()">Done — save</button>
     </div>
   </div>
 
@@ -1753,7 +1809,7 @@
   </div>
 
 <script>
-const APP_VERSION = "1.5.22";
+const APP_VERSION = "1.5.24";
 const PAGES_URL = "https://azzabazza11.github.io/golf-tracker/";
 const FEEDBACK_EMAIL = "aaron.callinan@gmail.com";
 const SUPPORT_URL = "https://ko-fi.com/aaroncallinan";
@@ -1771,11 +1827,18 @@ const DEFAULT_MAP_VIEW = { offsetX: 0, offsetY: 0, scale: 1, rotation: 0 };
 const GPS_BUF_MAX_MS = 60000;
 const GPS_MAX_FOOT_SPEED_MS = 15;
 const COURSE_DETECT_M = 120;
-const GREEN_TAP_WINDOW_MS = 2800;
+const GREEN_TAP_WINDOW_MS = 2800; // fallback; prefer sens("greenTapWindowMs")
 const GREEN_TAP_COUNT = 3;
-const GREEN_TAP_REFRACTORY_MS = 450;
-const GREEN_TAP_ARM_MS = 900;
+const GREEN_TAP_REFRACTORY_MS = 450; // fallback; prefer sens("greenTapRefractoryMs")
+const GREEN_TAP_ARM_MS = 1400; // dwell after entering zone — filters GPS jumps onto green
 const GREEN_TAP_EXIT_BUFFER_M = 4;
+const GREEN_TAP_SENS_KEYS = [
+  "greenTapDelta",
+  "greenTapFloor",
+  "greenTapImpulseMs",
+  "greenTapRefractoryMs",
+  "greenTapWindowMs"
+];
 const CALIBRATION_FORMAT = "gst-calibration-v1";
 const CALIBRATION_TICK_MS = 200;
 const CAL_MARK_THRESHOLD = 75;
@@ -1825,7 +1888,12 @@ const SENSITIVITY_DEFAULTS = {
   motionSensitivity: 5,
   motionStopPeak: 20,
   motionStopS: 3,
-  markConfirmMoveM: 3
+  markConfirmMoveM: 3,
+  greenTapDelta: 2.8,
+  greenTapFloor: 5.5,
+  greenTapImpulseMs: 180,
+  greenTapRefractoryMs: 450,
+  greenTapWindowMs: 2800
 };
 
 const SENSITIVITY_PRESETS = {
@@ -1841,7 +1909,12 @@ const SENSITIVITY_PRESETS = {
     motionSensitivity: 3,
     motionStopPeak: 14,
     motionStopS: 4,
-    markConfirmMoveM: 3
+    markConfirmMoveM: 3,
+    greenTapDelta: 3.2,
+    greenTapFloor: 6.5,
+    greenTapImpulseMs: 150,
+    greenTapRefractoryMs: 500,
+    greenTapWindowMs: 2600
   },
   balanced: { ...SENSITIVITY_DEFAULTS },
   forgiving: {
@@ -1856,7 +1929,12 @@ const SENSITIVITY_PRESETS = {
     motionSensitivity: 7,
     motionStopPeak: 28,
     motionStopS: 2.5,
-    markConfirmMoveM: 3
+    markConfirmMoveM: 3,
+    greenTapDelta: 2.2,
+    greenTapFloor: 4.5,
+    greenTapImpulseMs: 220,
+    greenTapRefractoryMs: 400,
+    greenTapWindowMs: 3000
   }
 };
 
@@ -1868,11 +1946,16 @@ const SENSITIVITY_RANGES = {
   teeNearM: { min: 2, max: 8, step: 0.5, label: "Tee near radius (m)" },
   teeLeaveM: { min: 4, max: 15, step: 1, label: "Tee leave radius (m)" },
   pinAcceptM: { min: 5, max: 20, step: 1, label: "Pin accept radius (m)" },
-  onGreenM: { min: 3, max: 25, step: 1, label: "On-green radius (m, +GPS accuracy)" },
+  onGreenM: { min: 3, max: 25, step: 1, label: "On-green / green-tap radius (m)" },
   motionSensitivity: { min: 1, max: 10, step: 1, label: "Swing keenness (1 strict → 10 keen)" },
   motionStopPeak: { min: 8, max: 45, step: 1, label: "Stop when motion peak ≤" },
   motionStopS: { min: 1, max: 10, step: 0.5, label: "Stop hold time (s)" },
-  markConfirmMoveM: { min: 1, max: 8, step: 0.5, label: "Walk-away confirm chime (m)" }
+  markConfirmMoveM: { min: 1, max: 8, step: 0.5, label: "Walk-away confirm chime (m)" },
+  greenTapDelta: { min: 1, max: 8, step: 0.1, label: "Tap: above baseline +" },
+  greenTapFloor: { min: 2, max: 15, step: 0.5, label: "Tap: min magnitude" },
+  greenTapImpulseMs: { min: 60, max: 400, step: 10, label: "Tap: max impulse (ms)" },
+  greenTapRefractoryMs: { min: 200, max: 1200, step: 50, label: "Tap: gap between counts (ms)" },
+  greenTapWindowMs: { min: 1200, max: 5000, step: 100, label: "Tap: window for 3 counts (ms)" }
 };
 
 // Safe storage load — never reference `courses`/`rounds` inside this helper (avoids TDZ)
@@ -2031,6 +2114,13 @@ let lastGreenTapLogAt = 0;
 let lastGreenTapCountedAt = 0;
 let greenTapArmUntil = 0;     // ignore taps until this time after entering zone
 let greenTapWasInZone = false;
+let greenTapSpikeActive = false;
+let greenTapSpikeStart = 0;
+let greenTapSpikePeak = 0;
+let greenTapCalibOpen = false;
+let greenTapCalibTaps = 0;
+let greenTapCalibShakes = 0;
+let greenTapCalibFlashUntil = 0;
 let courseSuggestId = null;
 let beginTeeChimedHole = null;
 
@@ -3238,6 +3328,10 @@ function showScreen(id) {
 
 function closeModal() {
   const editWasOpen = document.getElementById("modal-edit-club")?.classList.contains("active");
+  if (document.getElementById("modal-green-tap-calib")?.classList.contains("active")) {
+    greenTapCalibOpen = false;
+    saveSettings();
+  }
   document.querySelectorAll(".modal").forEach(m => {
     if (m.id === "modal-map") return;
     if (m.id === "modal-map-image-scope") return;
@@ -3284,6 +3378,7 @@ function updateLiveDistance() {
   }
   checkTeeHandoffProximity();
   maybeAutoTeeHandsOff();
+  updateGreenZoneUI();
 }
 
 // ---------- Course hole extras (pin + drives) ----------
@@ -6382,6 +6477,61 @@ function drawHoleMap() {
     ctx.stroke();
   }
 
+  function drawZoneCircle(centerM, radiusM, strokeStyle, fillStyle, dash) {
+    if (!centerM || !(radiusM > 0) || !mapFit.scale) return;
+    const c = metersToCanvas(centerM, mapFit);
+    const rPx = radiusM * mapFit.scale;
+    ctx.beginPath();
+    ctx.setLineDash(dash || []);
+    ctx.strokeStyle = strokeStyle;
+    ctx.lineWidth = 2 / Math.max(view.scale, 0.01);
+    if (fillStyle) {
+      ctx.fillStyle = fillStyle;
+      ctx.arc(c.x, c.y, rPx, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      ctx.arc(c.x, c.y, rPx, 0, Math.PI * 2);
+    }
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  // To-scale event zones (tee near / on-green tap)
+  const youInGreen = !!(youPos && pts.green && settings.greenTapPutts &&
+    haversine(youPos.lat, youPos.lon, pts.green.lat, pts.green.lon) <= sens("onGreenM"));
+  const youNearTee = !!(youPos && pts.tee &&
+    haversine(youPos.lat, youPos.lon, pts.tee.lat, pts.tee.lon) <= sens("teeNearM"));
+  if (teeM) {
+    drawZoneCircle(
+      teeM,
+      sens("teeLeaveM"),
+      "rgba(255,255,255,0.35)",
+      null,
+      [6 / Math.max(view.scale, 0.01), 5 / Math.max(view.scale, 0.01)]
+    );
+    drawZoneCircle(
+      teeM,
+      sens("teeNearM"),
+      youNearTee ? "rgba(255,255,255,0.95)" : "rgba(255,255,255,0.7)",
+      youNearTee ? "rgba(255,255,255,0.12)" : "rgba(255,255,255,0.05)"
+    );
+  }
+  if (greenM && settings.greenTapPutts) {
+    drawZoneCircle(
+      greenM,
+      sens("onGreenM") + GREEN_TAP_EXIT_BUFFER_M,
+      "rgba(46,204,113,0.35)",
+      null,
+      [5 / Math.max(view.scale, 0.01), 4 / Math.max(view.scale, 0.01)]
+    );
+    drawZoneCircle(
+      greenM,
+      sens("onGreenM"),
+      youInGreen ? "rgba(46,204,113,0.95)" : "rgba(46,204,113,0.75)",
+      youInGreen ? "rgba(46,204,113,0.28)" : "rgba(46,204,113,0.1)"
+    );
+  }
+
   if (teeM) drawMarker(metersToCanvas(teeM, mapFit), "#ffffff", 9);
   shotM.forEach(p => {
     const fitPt = metersToCanvas(p, mapFit);
@@ -7429,23 +7579,59 @@ function metresFromMarkSpot() {
 }
 
 /** Green-tap zone with exit hysteresis (GPS flicker must not clear tap count). */
-function greenTapEnterM(pos) {
-  const base = sens("onGreenM");
-  const acc = pos && pos.accuracy != null ? Number(pos.accuracy) : 0;
-  // Expand by GPS uncertainty so a tight on-green setting still works (±5–15 m fixes)
-  return base + Math.min(Math.max(acc, 0), 10);
-}
-
 function inGreenTapZone() {
   if (!settings.greenTapPutts || !settings.autoMark || !currentRound || isTeeingOff) return false;
   const pin = getPin(currentHoleIndex);
   const pos = getBestMarkPosition() || currentPosition;
   if (!pin || !pos) return false;
   const d = haversine(pos.lat, pos.lon, pin.lat, pin.lon);
-  const enterM = greenTapEnterM(pos);
+  const enterM = sens("onGreenM");
   const leaveM = enterM + GREEN_TAP_EXIT_BUFFER_M;
   if (greenTapWasInZone) return d <= leaveM;
   return d <= enterM;
+}
+
+function metresToPin() {
+  const pin = currentRound ? getPin(currentHoleIndex) : null;
+  const pos = getBestMarkPosition() || currentPosition;
+  if (!pin || !pos) return null;
+  return haversine(pos.lat, pos.lon, pin.lat, pin.lon);
+}
+
+function updateGreenZoneUI() {
+  const el = document.getElementById("green-zone-line");
+  if (!el) return;
+  if (!settings.greenTapPutts || !settings.autoMark || !currentRound || isTeeingOff) {
+    el.classList.remove("show", "in-zone");
+    el.textContent = "";
+    return;
+  }
+  const pin = getPin(currentHoleIndex);
+  const d = metresToPin();
+  const enterM = sens("onGreenM");
+  if (!pin) {
+    el.classList.add("show");
+    el.classList.remove("in-zone");
+    el.textContent = "Green tap: no pin mapped for this hole";
+    return;
+  }
+  if (d == null) {
+    el.classList.remove("show", "in-zone");
+    el.textContent = "";
+    return;
+  }
+  if (inGreenTapZone()) {
+    el.classList.add("show", "in-zone");
+    const bumps = greenTapBumpCount > 0 ? ` · bumps ${greenTapBumpCount}/${GREEN_TAP_COUNT}` : "";
+    el.textContent = `ON GREEN · ${d.toFixed(1)} m to pin · tap zone active${bumps}`;
+  } else if (d <= enterM + 20) {
+    el.classList.add("show");
+    el.classList.remove("in-zone");
+    el.textContent = `${d.toFixed(1)} m to pin · green tap needs ≤${enterM} m (chip/bump OK here)`;
+  } else {
+    el.classList.remove("show", "in-zone");
+    el.textContent = "";
+  }
 }
 
 function hybridStageTitle() {
@@ -7490,6 +7676,7 @@ function hybridStageMetaText() {
 function updateAmStageUI() {
   const testOn = !!(settings.testMode && settings.autoMark && autoMarkWatching && !isTeeingOff);
   const greenZone = inGreenTapZone();
+  updateGreenZoneUI();
   const greenHud = !!(settings.greenTapPutts && (Date.now() < greenTapFlashUntil || greenZone));
   const showLock = !!(pocketLocked && (testOn || greenHud));
   const stageEl = document.getElementById("pocket-lock-stage");
@@ -7647,7 +7834,7 @@ function pushTestLog(type, data) {
   // #endregion
   // Rate-limit hot types that previously blew the export to ~400KB
   // Rate-limit hot types that previously blew the export to ~400KB
-  if (type === "mark_deferred" || type === "walk_audio_confirm" || type === "auto_tee_wait" || type === "green_outside") {
+  if (type === "mark_deferred" || type === "walk_audio_confirm" || type === "auto_tee_wait" || type === "green_outside" || type === "green_tap_shake") {
     const key = "_last_" + type;
     if (pushTestLog[key] && _now - pushTestLog[key] < 2000) return;
     pushTestLog[key] = _now;
@@ -8209,7 +8396,15 @@ function onDeviceMotion(ev) {
   // Hybrid first only off-green; on-green hybrid pauses inside updateHybridAutoMark
   if (autoMarkWatching) updateHybridAutoMark();
 
-  // Green tap — discrete taps with refractory (not every high-mag sample)
+  // Green tap / calib — impulse detection (not every high-mag sample)
+  const gEval = evaluateGreenTapImpulse(mag, now);
+  if (greenTapCalibOpen) {
+    updateGreenTapCalibUI(gEval);
+    if (gEval.kind === "tap") registerGreenTapCalibEvent(gEval);
+    else if (gEval.kind === "shake") registerGreenTapCalibShake(gEval);
+    return;
+  }
+
   if (!settings.greenTapPutts || !settings.autoMark || !currentRound || isTeeingOff) {
     greenTapNearPin = false;
     greenTapBumpCount = 0;
@@ -8228,49 +8423,65 @@ function onDeviceMotion(ev) {
     const pos = getBestMarkPosition() || currentPosition;
     if (pin && pos) {
       const dPin = haversine(pos.lat, pos.lon, pin.lat, pin.lon);
-      const enterM = greenTapEnterM(pos);
+      const enterM = sens("onGreenM");
       if (dPin <= enterM + 25) {
         pushTestLog("green_outside", {
           dPin: Math.round(dPin * 10) / 10,
-          enterM: Math.round(enterM * 10) / 10,
+          enterM,
           onGreenM: sens("onGreenM"),
           accuracy: pos.accuracy != null ? Math.round(pos.accuracy * 10) / 10 : null
         });
       }
     }
+    updateGreenZoneUI();
     return;
   }
   greenTapNearPin = true;
+  updateGreenZoneUI();
   if (now < greenTapArmUntil) {
     greenTapBumpCount = greenTapTimes.length;
     updateAmStageUI();
     return;
   }
-  if (motionBuf.length < 3) return;
-  const vals = motionBuf.map(s => s.m);
-  const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
-  const isBump = mag >= mean + 2.8 || mag >= 5.5;
-  if (!isBump) {
+  if (gEval.kind === "shake") {
+    pushTestLog("green_tap_shake", {
+      dur: gEval.dur,
+      peak: Math.round(gEval.peak * 10) / 10,
+      thresh: Math.round(gEval.thresh * 10) / 10
+    });
+    updateAmStageUI();
+    return;
+  }
+  if (gEval.kind !== "tap") {
     greenTapBumpCount = greenTapTimes.length;
     updateAmStageUI();
     return;
   }
-  if (now - lastGreenTapCountedAt < GREEN_TAP_REFRACTORY_MS) {
+  const refractory = sens("greenTapRefractoryMs") || GREEN_TAP_REFRACTORY_MS;
+  if (now - lastGreenTapCountedAt < refractory) {
     greenTapBumpCount = greenTapTimes.length;
     updateAmStageUI();
     return;
   }
   lastGreenTapCountedAt = now;
   greenTapTimes.push(now);
-  greenTapTimes = greenTapTimes.filter(t => now - t < GREEN_TAP_WINDOW_MS);
+  const windowMs = sens("greenTapWindowMs") || GREEN_TAP_WINDOW_MS;
+  greenTapTimes = greenTapTimes.filter(t => now - t < windowMs);
   greenTapBumpCount = greenTapTimes.length;
-  pushTestLog("green_tap_bump", { count: greenTapBumpCount, dPin: Math.round(haversine(
-    (getBestMarkPosition() || currentPosition).lat,
-    (getBestMarkPosition() || currentPosition).lon,
-    getPin(currentHoleIndex).lat,
-    getPin(currentHoleIndex).lon
-  )), mag: Math.round(mag * 10) / 10 });
+  pushTestLog("green_tap_bump", {
+    count: greenTapBumpCount,
+    dPin: Math.round(haversine(
+      (getBestMarkPosition() || currentPosition).lat,
+      (getBestMarkPosition() || currentPosition).lon,
+      getPin(currentHoleIndex).lat,
+      getPin(currentHoleIndex).lon
+    )),
+    mag: Math.round(gEval.peak * 10) / 10,
+    dur: gEval.dur,
+    thresh: Math.round(gEval.thresh * 10) / 10
+  });
   updateAmStageUI();
+  updateGreenZoneUI();
   if (greenTapTimes.length >= GREEN_TAP_COUNT) {
     greenTapTimes = [];
     greenTapBumpCount = 0;
@@ -8278,6 +8489,226 @@ function onDeviceMotion(ev) {
     greenTapArmUntil = now + GREEN_TAP_ARM_MS;
     tryGreenTapPutt(getBestMarkPosition() || currentPosition);
   }
+}
+
+function greenTapMotionMean() {
+  if (motionBuf.length < 3) return null;
+  const vals = motionBuf.map(s => s.m);
+  return vals.reduce((a, b) => a + b, 0) / vals.length;
+}
+
+/** Rising/falling edge impulse classifier — tap vs sustained shake. */
+function evaluateGreenTapImpulse(mag, now) {
+  const mean = greenTapMotionMean();
+  const delta = sens("greenTapDelta");
+  const floor = sens("greenTapFloor");
+  const impulseMs = sens("greenTapImpulseMs");
+  const thresh = mean != null ? Math.max(mean + delta, floor) : floor;
+  const out = {
+    kind: "none",
+    mag,
+    mean: mean != null ? mean : 0,
+    thresh,
+    peak: mag,
+    dur: 0,
+    above: greenTapSpikeActive
+  };
+  if (mean == null) return out;
+
+  if (mag >= thresh) {
+    if (!greenTapSpikeActive) {
+      greenTapSpikeActive = true;
+      greenTapSpikeStart = now;
+      greenTapSpikePeak = mag;
+    } else {
+      greenTapSpikePeak = Math.max(greenTapSpikePeak, mag);
+    }
+    out.above = true;
+    out.peak = greenTapSpikePeak;
+    out.dur = now - greenTapSpikeStart;
+    return out;
+  }
+
+  if (greenTapSpikeActive) {
+    const dur = now - greenTapSpikeStart;
+    const peak = greenTapSpikePeak;
+    greenTapSpikeActive = false;
+    out.peak = peak;
+    out.dur = dur;
+    if (dur > 0 && dur <= impulseMs) {
+      out.kind = "tap";
+    } else {
+      out.kind = "shake";
+    }
+    return out;
+  }
+  return out;
+}
+
+function openGreenTapCalib() {
+  greenTapCalibOpen = true;
+  greenTapCalibTaps = 0;
+  greenTapCalibShakes = 0;
+  greenTapTimes = [];
+  greenTapBumpCount = 0;
+  greenTapSpikeActive = false;
+  renderGreenTapCalibSliders();
+  updateGreenTapCalibUI({ kind: "none", mag: 0, mean: 0, thresh: sens("greenTapFloor"), peak: 0, dur: 0 });
+  const flash = document.getElementById("gtc-flash");
+  if (flash) {
+    flash.textContent = "Ready — tap the phone";
+    flash.style.color = "var(--accent)";
+  }
+  document.getElementById("modal-green-tap-calib").classList.add("active");
+  startMotionDiagListener();
+  ensureAudioCtx();
+  if (typeof DeviceMotionEvent !== "undefined" && typeof DeviceMotionEvent.requestPermission === "function") {
+    DeviceMotionEvent.requestPermission().then(s => {
+      if (s === "granted") startMotionDiagListener();
+      else showToast("Motion permission needed for tap calibration");
+    }).catch(() => {});
+  }
+}
+
+function closeGreenTapCalib() {
+  greenTapCalibOpen = false;
+  saveSettings();
+  document.getElementById("modal-green-tap-calib").classList.remove("active");
+  showToast("Green tap settings saved");
+  renderSettings();
+}
+
+function resetGreenTapCalibCounts() {
+  greenTapCalibTaps = 0;
+  greenTapCalibShakes = 0;
+  greenTapTimes = [];
+  greenTapBumpCount = 0;
+  const c = document.getElementById("gtc-count");
+  if (c) c.textContent = "0";
+  const t = document.getElementById("gtc-taps");
+  if (t) t.textContent = "0";
+  const s = document.getElementById("gtc-shakes");
+  if (s) s.textContent = "0";
+  const last = document.getElementById("gtc-last");
+  if (last) last.textContent = "Last: —";
+  const flash = document.getElementById("gtc-flash");
+  if (flash) {
+    flash.textContent = "Ready — tap the phone";
+    flash.style.color = "var(--accent)";
+  }
+}
+
+function applyGreenTapCalibPreset(name) {
+  const p = SENSITIVITY_PRESETS[name] || SENSITIVITY_PRESETS.balanced;
+  GREEN_TAP_SENS_KEYS.forEach(k => {
+    if (p[k] != null) settings[k] = clampSens(k, p[k]);
+  });
+  saveSettings();
+  renderGreenTapCalibSliders();
+  showToast(name === "strict" ? "Stricter taps (reject more shake)" : "More forgiving taps");
+}
+
+function renderGreenTapCalibSliders() {
+  const host = document.getElementById("gtc-sliders");
+  if (!host) return;
+  host.innerHTML = GREEN_TAP_SENS_KEYS.map(key => {
+    const r = SENSITIVITY_RANGES[key];
+    const v = sens(key);
+    return `<div class="sens-row" style="margin:10px 0">
+      <label style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px">
+        <span>${r.label}</span><strong id="gtc-val-${key}">${v}</strong>
+      </label>
+      <input type="range" min="${r.min}" max="${r.max}" step="${r.step}" value="${v}"
+        oninput="onGreenTapCalibSlider('${key}', this.value)">
+    </div>`;
+  }).join("");
+}
+
+function onGreenTapCalibSlider(key, value) {
+  settings[key] = clampSens(key, value);
+  const el = document.getElementById("gtc-val-" + key);
+  if (el) el.textContent = String(sens(key));
+  saveSettings();
+}
+
+function updateGreenTapCalibUI(ev) {
+  const magEl = document.getElementById("gtc-mag");
+  const stats = document.getElementById("gtc-stats");
+  const bar = document.getElementById("gtc-bar");
+  if (magEl) magEl.textContent = (Math.round(ev.mag * 10) / 10).toFixed(1);
+  if (stats) {
+    stats.textContent =
+      `baseline ${ev.mean.toFixed(1)} · thresh ${ev.thresh.toFixed(1)} · peak ${ev.peak.toFixed(1)}` +
+      (ev.above ? ` · spike ${ev.dur} ms` : "");
+  }
+  if (bar) {
+    const pct = Math.min(100, (ev.mag / Math.max(ev.thresh * 2, 12)) * 100);
+    bar.style.width = pct + "%";
+    bar.style.background = ev.above
+      ? (ev.dur > sens("greenTapImpulseMs") ? "#e67e22" : "var(--accent)")
+      : "var(--accent)";
+  }
+  if (Date.now() < greenTapCalibFlashUntil) return;
+}
+
+function registerGreenTapCalibEvent(ev) {
+  greenTapCalibTaps++;
+  greenTapTimes.push(Date.now());
+  const windowMs = sens("greenTapWindowMs") || GREEN_TAP_WINDOW_MS;
+  greenTapTimes = greenTapTimes.filter(t => Date.now() - t < windowMs);
+  greenTapBumpCount = greenTapTimes.length;
+  const c = document.getElementById("gtc-count");
+  if (c) c.textContent = String(greenTapBumpCount);
+  const t = document.getElementById("gtc-taps");
+  if (t) t.textContent = String(greenTapCalibTaps);
+  const last = document.getElementById("gtc-last");
+  if (last) {
+    last.textContent = `Last TAP · peak ${ev.peak.toFixed(1)} · ${ev.dur} ms (≤ ${sens("greenTapImpulseMs")} ms)`;
+  }
+  const flash = document.getElementById("gtc-flash");
+  if (flash) {
+    flash.textContent = greenTapBumpCount >= GREEN_TAP_COUNT ? "PUTT WOULD MARK" : `TAP ${greenTapBumpCount}/${GREEN_TAP_COUNT}`;
+    flash.style.color = greenTapBumpCount >= GREEN_TAP_COUNT ? "#1e8449" : "var(--accent)";
+  }
+  greenTapCalibFlashUntil = Date.now() + 450;
+  if (settings.markSound) {
+    try {
+      ensureAudioCtx();
+      if (audioCtx) {
+        const t0 = audioCtx.currentTime;
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.frequency.value = greenTapBumpCount >= GREEN_TAP_COUNT ? 880 : 660;
+        gain.gain.setValueAtTime(0.0001, t0);
+        gain.gain.exponentialRampToValueAtTime(0.12, t0 + 0.01);
+        gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.08);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start(t0);
+        osc.stop(t0 + 0.09);
+      }
+    } catch (_) {}
+  }
+  if (greenTapBumpCount >= GREEN_TAP_COUNT) {
+    greenTapTimes = [];
+    greenTapBumpCount = 0;
+  }
+}
+
+function registerGreenTapCalibShake(ev) {
+  greenTapCalibShakes++;
+  const s = document.getElementById("gtc-shakes");
+  if (s) s.textContent = String(greenTapCalibShakes);
+  const last = document.getElementById("gtc-last");
+  if (last) {
+    last.textContent = `Rejected SHAKE · peak ${ev.peak.toFixed(1)} · ${ev.dur} ms (> ${sens("greenTapImpulseMs")} ms)`;
+  }
+  const flash = document.getElementById("gtc-flash");
+  if (flash) {
+    flash.textContent = "SHAKE — ignored";
+    flash.style.color = "#e67e22";
+  }
+  greenTapCalibFlashUntil = Date.now() + 500;
 }
 
 function tryGreenTapPutt(pos) {
