@@ -1753,7 +1753,7 @@
   </div>
 
 <script>
-const APP_VERSION = "1.5.20";
+const APP_VERSION = "1.5.21";
 const PAGES_URL = "https://azzabazza11.github.io/golf-tracker/";
 const FEEDBACK_EMAIL = "aaron.callinan@gmail.com";
 const SUPPORT_URL = "https://ko-fi.com/aaroncallinan";
@@ -3863,6 +3863,30 @@ function nearCurrentHoleTee() {
   return d <= sens("teeNearM");
 }
 
+/** Hands-off subsequent tees: near tee + GPS ok + motion stopped before auto-tee/settle. */
+function teeAutoReadyState() {
+  const gps = getBestMarkPosition() || currentPosition;
+  const blockers = [];
+  let accuracy = gps && gps.accuracy != null ? gps.accuracy : null;
+  if (!gps) blockers.push("nogps");
+  else if (accuracy != null && accuracy > sens("gpsMaxAccuracyM")) blockers.push("gps");
+
+  startMotionDiagListener();
+  tickMotionStopClock(Date.now());
+  const needQuietMs = Math.max(1000, sens("motionStopS") * 500);
+  if (!isMotionBelowStopPeak() || !motionQuietSince) blockers.push("motion");
+  else if (Date.now() - motionQuietSince < needQuietMs) blockers.push("motion_hold");
+
+  return {
+    ok: blockers.length === 0,
+    blockers,
+    accuracy,
+    peak: Math.round(motionPeakHold),
+    quietMs: motionQuietSince ? Date.now() - motionQuietSince : 0,
+    needQuietMs
+  };
+}
+
 function maybeAutoTeeHandsOff() {
   if (!currentRound || currentRound.mode !== "handsOff") return;
   if (!isTeeingOff) return;
@@ -3878,16 +3902,29 @@ function maybeAutoTeeHandsOff() {
   const dTee = metresToCurrentHoleTee();
   if (known) {
     if (dTee == null || dTee > sens("teeNearM")) {
-      updateWaitingNextTeeHint(dTee);
+      updateWaitingNextTeeHint(dTee, null);
       return;
     }
   } else if (!(getBestMarkPosition() || currentPosition)) {
-    updateWaitingNextTeeHint(null);
+    updateWaitingNextTeeHint(null, null);
+    return;
+  }
+
+  const ready = teeAutoReadyState();
+  if (!ready.ok) {
+    updateWaitingNextTeeHint(dTee, ready);
+    pushTestLog("auto_tee_wait", {
+      dTee: dTee != null ? Math.round(dTee * 10) / 10 : null,
+      blockers: ready.blockers,
+      peak: ready.peak,
+      accuracy: ready.accuracy,
+      quietMs: ready.quietMs
+    });
     return;
   }
 
   if (!autoTeeOffSilent()) {
-    updateWaitingNextTeeHint(dTee);
+    updateWaitingNextTeeHint(dTee, ready);
     // #region agent log
     dbgAgentLog("H-TEE", "maybeAutoTeeHandsOff", "auto_tee_failed", {
       hole: currentHoleIndex + 1,
@@ -3899,17 +3936,35 @@ function maybeAutoTeeHandsOff() {
   }
 }
 
-function updateWaitingNextTeeHint(dTee) {
+function updateWaitingNextTeeHint(dTee, ready) {
   const clubEl = document.getElementById("current-club-display");
   if (!clubEl || !currentRound || !isTeeingOff) return;
   const hole = currentRound.holes[currentHoleIndex];
-  const distBit = dTee != null && Number.isFinite(dTee)
-    ? ` · ${Math.round(dTee)} m away`
-    : "";
-  clubEl.textContent = `Walk to hole ${hole.holeNumber} tee${distBit}`;
   const btn = document.getElementById("btn-main");
+  const near = dTee != null && dTee <= sens("teeNearM");
+
+  let msg;
+  let btnText;
+  if (!near && dTee != null) {
+    msg = `Walk to hole ${hole.holeNumber} tee · ${Math.round(dTee)} m away`;
+    btnText = `Walk to tee (${Math.round(dTee)} m)`;
+  } else if (!near) {
+    msg = `Walk to hole ${hole.holeNumber} tee`;
+    btnText = "Walk to next tee";
+  } else if (ready && ready.blockers && ready.blockers.includes("gps")) {
+    msg = `Near hole ${hole.holeNumber} tee · waiting for GPS`;
+    btnText = "Near tee — wait for GPS";
+  } else if (ready && ready.blockers && (ready.blockers.includes("motion") || ready.blockers.includes("motion_hold"))) {
+    msg = `Near hole ${hole.holeNumber} tee · stop walking to tee off`;
+    btnText = "Near tee — stop walking";
+  } else {
+    msg = `Near hole ${hole.holeNumber} tee · ready`;
+    btnText = "Auto teeing…";
+  }
+
+  clubEl.textContent = msg;
   if (btn && currentRound.mode === "handsOff") {
-    btn.textContent = dTee != null ? `Walk to tee (${Math.round(dTee)} m)` : "Walk to next tee";
+    btn.textContent = btnText;
     btn.disabled = true;
   }
 }
@@ -4075,7 +4130,8 @@ function updatePlayUI() {
         btn.disabled = false;
       } else {
         const dTee = metresToCurrentHoleTee();
-        btn.textContent = dTee != null ? `Walk to tee (${Math.round(dTee)} m)` : "Walk to next tee";
+        const near = dTee != null && dTee <= sens("teeNearM");
+        btn.textContent = near ? "Near tee — stop walking" : (dTee != null ? `Walk to tee (${Math.round(dTee)} m)` : "Walk to next tee");
         btn.disabled = true;
         maybeAutoTeeHandsOff();
       }
@@ -4112,7 +4168,7 @@ function updatePlayUI() {
         : null;
       updateWaitingTeeHint(nearest || { dist: null });
     } else if (isTeeingOff && currentRound && currentRound.mode === "handsOff") {
-      updateWaitingNextTeeHint(metresToCurrentHoleTee());
+      updateWaitingNextTeeHint(metresToCurrentHoleTee(), nearCurrentHoleTee() ? teeAutoReadyState() : null);
     } else if (isTeeingOff) {
       clubEl.textContent = "";
     } else if (clubForCurrentShot) {
@@ -7583,7 +7639,8 @@ function pushTestLog(type, data) {
   }
   // #endregion
   // Rate-limit hot types that previously blew the export to ~400KB
-  if (type === "mark_deferred" || type === "walk_audio_confirm") {
+  // Rate-limit hot types that previously blew the export to ~400KB
+  if (type === "mark_deferred" || type === "walk_audio_confirm" || type === "auto_tee_wait") {
     const key = "_last_" + type;
     if (pushTestLog[key] && _now - pushTestLog[key] < 2000) return;
     pushTestLog[key] = _now;
@@ -7913,6 +7970,8 @@ function autoTeeOffSilent() {
       ? haversine(gps.lat, gps.lon, known.lat, known.lon)
       : Infinity;
     if (d > sens("teeNearM")) return false;
+    const ready = teeAutoReadyState();
+    if (!ready.ok) return false;
   }
 
   const typical = typicalClubForHole(currentRound.courseId, currentHoleIndex, 1);

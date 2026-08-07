@@ -1,4 +1,4 @@
-const CACHE = 'shot-tracker-v1.5.20';
+const CACHE = 'shot-tracker-v1.5.21';
 const ASSETS = [
   './manifest.webmanifest',
   './app-icon.svg',
