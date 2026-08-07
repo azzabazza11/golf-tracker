@@ -1237,7 +1237,7 @@
       <div class="setting-row">
         <div class="setting-text">
           <strong>Green tap putts</strong>
-          <span>Near the pin, tap/shake the phone ~3 times to mark a putt (auto-mark on).</span>
+          <span>Near the pin (on-green radius), hybrid auto-mark pauses — tap/shake ~3× to mark a putt instead.</span>
         </div>
         <label class="switch">
           <input type="checkbox" id="setting-green-tap" onchange="onGreenTapToggle(this.checked)">
@@ -1753,7 +1753,7 @@
   </div>
 
 <script>
-const APP_VERSION = "1.5.10";
+const APP_VERSION = "1.5.11";
 const PAGES_URL = "https://azzabazza11.github.io/golf-tracker/";
 const FEEDBACK_EMAIL = "aaron.callinan@gmail.com";
 const SUPPORT_URL = "https://ko-fi.com/aaroncallinan";
@@ -7127,10 +7127,20 @@ function metresFromMarkSpot() {
   return haversine(hybridMarkSpot.lat, hybridMarkSpot.lon, pos.lat, pos.lon);
 }
 
+/** Green-tap zone: auto-mark hybrid pauses — tap putts only (either/or). */
+function inGreenTapZone() {
+  if (!settings.greenTapPutts || !settings.autoMark || !currentRound || isTeeingOff) return false;
+  const pin = getPin(currentHoleIndex);
+  const pos = getBestMarkPosition() || currentPosition;
+  if (!pin || !pos) return false;
+  return haversine(pos.lat, pos.lon, pin.lat, pin.lon) <= sens("onGreenM");
+}
+
 function hybridStageTitle() {
   if (Date.now() < greenTapFlashUntil) return "GREEN TAP PUTT";
-  if (greenTapNearPin && greenTapBumpCount > 0 && settings.greenTapPutts) {
-    return `GREEN TAP ${greenTapBumpCount}/${GREEN_TAP_COUNT}`;
+  if (inGreenTapZone()) {
+    if (greenTapBumpCount > 0) return `GREEN TAP ${greenTapBumpCount}/${GREEN_TAP_COUNT}`;
+    return "GREEN TAP ZONE";
   }
   const stage = hybridStage;
   if (stage === "settling") {
@@ -7159,7 +7169,8 @@ function hybridStageMetaText() {
 
 function updateAmStageUI() {
   const testOn = !!(settings.testMode && settings.autoMark && autoMarkWatching && !isTeeingOff);
-  const greenHud = !!(settings.greenTapPutts && (Date.now() < greenTapFlashUntil || (greenTapNearPin && greenTapBumpCount > 0)));
+  const greenZone = inGreenTapZone();
+  const greenHud = !!(settings.greenTapPutts && (Date.now() < greenTapFlashUntil || greenZone));
   const showLock = !!(pocketLocked && (testOn || greenHud));
   const stageEl = document.getElementById("pocket-lock-stage");
   const titleEl = document.getElementById("pocket-lock-stage-title");
@@ -7170,10 +7181,11 @@ function updateAmStageUI() {
     if (titleEl) titleEl.textContent = hybridStageTitle();
     if (toneEl) {
       if (Date.now() < greenTapFlashUntil) toneEl.textContent = "Tone: Green tap putt";
-      else if (greenTapNearPin && greenTapBumpCount > 0) toneEl.textContent = `Green tap bumps ${greenTapBumpCount}/${GREEN_TAP_COUNT}`;
+      else if (greenZone && greenTapBumpCount > 0) toneEl.textContent = `Green tap bumps ${greenTapBumpCount}/${GREEN_TAP_COUNT}`;
+      else if (greenZone) toneEl.textContent = "Auto-mark paused — tap phone to mark putt";
       else toneEl.textContent = lastToneLegend ? ("Tone: " + lastToneLegend) : "";
     }
-    if (metaEl) metaEl.textContent = hybridStageMetaText();
+    if (metaEl) metaEl.textContent = greenZone ? "On green · hybrid auto-mark off" : hybridStageMetaText();
   }
 
   const playStage = document.getElementById("am-stage-line");
@@ -7186,9 +7198,11 @@ function updateAmStageUI() {
   if (playTone) {
     const toneTxt = Date.now() < greenTapFlashUntil
       ? "Tone: Green tap putt"
-      : (greenTapNearPin && greenTapBumpCount > 0)
+      : greenZone && greenTapBumpCount > 0
         ? `Green tap bumps ${greenTapBumpCount}/${GREEN_TAP_COUNT}`
-        : (lastToneLegend ? ("Tone: " + lastToneLegend) : "");
+        : greenZone
+          ? "Auto-mark paused — tap phone to mark putt"
+          : (lastToneLegend ? ("Tone: " + lastToneLegend) : "");
     playTone.classList.toggle("show", showPlay && !!toneTxt);
     if (showPlay) playTone.textContent = toneTxt;
   }
@@ -7724,6 +7738,7 @@ function getAutoMarkCountdownState() {
     return { show: false };
   }
   if (!anchorPosition) return { show: false };
+  if (inGreenTapZone()) return { show: false };
   const armedLike = hybridStage === "armed" || hybridStage === "shot_triggered" || hybridStage === "marked";
   if (hybridStage === "watching") {
     const p = motionQuietProgress();
@@ -7950,6 +7965,25 @@ function updateHybridAutoMark() {
   if (document.getElementById("modal-tee")?.classList.contains("active")) return;
   if (teeHandoffInProgress || inTeeHandoffNearZone()) return;
   if (!anchorPosition) return;
+
+  // Green tap on + near pin: pause hybrid entirely (either/or)
+  if (inGreenTapZone()) {
+    if (hybridStage !== "watching" && hybridStage !== "marked") {
+      pushTestLog("hybrid_paused_green", { was: hybridStage });
+      hybridStage = "watching";
+      hybridMarkSpot = null;
+      hybridArmedAt = 0;
+      hybridSwingAt = 0;
+      motionQuietSince = null;
+      motionLoudSince = null;
+      settleTempoWasSettling = false;
+      lastToneLegend = "Auto-mark paused on green";
+    }
+    updateAutoMarkCountdownUI();
+    updateGpsDiagUI();
+    updateAmStageUI();
+    return;
+  }
 
   const cluster = getSettleCluster();
   const looseCluster = getSettleCluster({ loose: true });
