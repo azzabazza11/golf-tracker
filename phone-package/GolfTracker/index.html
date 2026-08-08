@@ -1824,7 +1824,7 @@
       <h3 style="margin-bottom:10px">Help</h3>
       <p class="modal-note"><strong>Fairway auto-mark</strong> — Stand still until armed, then your swing marks at that GPS spot. Walking away only plays a confirm chime (it does not wait to mark).</p>
       <p class="modal-note"><strong>Min shot move</strong> — Swings too close to the last mark are ignored (practice swings).</p>
-      <p class="modal-note"><strong>On the green</strong> — Near the pin, hybrid pauses. Three short phone taps mark a putt (not shakes). Calibrate taps in Settings. Once locked, the zone stays sticky past a GPS bump or a short roll off the green.</p>
+      <p class="modal-note"><strong>On the green</strong> — Near the pin, hybrid pauses (chime when green-tap locks). Three short phone taps mark a putt (not shakes). Calibrate taps in Settings. Once locked, the zone stays sticky past a GPS bump or a short roll off the green.</p>
       <p class="modal-note"><strong>Next tee</strong> — After hole-out, walk to the next tee (solid white circle), stop, then auto-tee. Don’t expect tee-off on the previous green.</p>
       <p class="modal-note"><strong>Map circles</strong> — Tee: solid = near-tee; dashed = leave buffer. Green: solid = enter / lock green-tap; dashed = sticky leave (~150% of enter).</p>
       <p class="modal-note"><strong>Club suggest</strong> — If you haven’t picked a club, the app suggests your usual club for that hole/shot when known, otherwise a club for the distance to the pin. Highlighted = autofill — tap to change.</p>
@@ -1986,7 +1986,7 @@
   </div>
 
 <script>
-const APP_VERSION = "1.5.33";
+const APP_VERSION = "1.5.34";
 const PAGES_URL = "https://azzabazza11.github.io/golf-tracker/";
 const FEEDBACK_EMAIL = "aaron.callinan@gmail.com";
 const SUPPORT_URL = "https://ko-fi.com/aaroncallinan";
@@ -2950,7 +2950,7 @@ function stopCalibrationSession() {
   const notesEl = document.getElementById("cal-export-notes");
   if (notesEl) notesEl.value = "";
 
-  if (!currentRound) stopGPS();
+  if (!currentRound) ensureGpsWarm();
   stopMotionDiagListener();
 
   document.getElementById("modal-cal-export")?.classList.add("active");
@@ -3888,18 +3888,7 @@ function renderHome() {
     el.innerHTML = recent.map(r => roundListRowHtml(r)).join("");
   }
   updateCourseSuggestBanner();
-  if (!watchId && navigator.geolocation && window.isSecureContext) {
-    try {
-      navigator.geolocation.getCurrentPosition(pos => {
-        currentPosition = {
-          lat: pos.coords.latitude,
-          lon: pos.coords.longitude,
-          accuracy: pos.coords.accuracy
-        };
-        updateCourseSuggestBanner();
-      }, () => {}, { enableHighAccuracy: true, maximumAge: 30000, timeout: 8000 });
-    } catch (_) {}
-  }
+  ensureGpsWarm();
 }
 
 function renderAllRounds() {
@@ -4137,14 +4126,13 @@ function startRound(courseId, opts) {
   resetTeeHandoffState();
   lastNearPinPos = null;
   lastPosBeforeNextTee = null;
-  gpsRecentBuf = [];
-  gpsGoodBuf = [];
+  // Keep gpsGoodBuf / gpsRecentBuf — warm settle continues from app-level GPS watch
   lastGpsDeferReason = null;
 
   document.getElementById("play-course-name").textContent =
     currentCourse.name + (mode === "handsOff" ? " · Hands-off" : "");
   updatePlayUI();
-  startGPS();
+  ensureGpsWarm();
   if (settings.autoMark) startMotionDiagListener();
   showScreen("play");
   recordTestEvent("start_round");
@@ -4560,7 +4548,7 @@ function endFlexibleRoundEarly() {
   }
   unlockPocketLock();
   stopAutoMarkWatch();
-  stopGPS();
+  ensureGpsWarm();
   showSummary();
 }
 
@@ -4893,7 +4881,7 @@ function advanceAfterHoleOut(opts) {
     maybeAutoTeeHandsOff();
   } else {
     if (keepLock) unlockPocketLock();
-    stopGPS();
+    ensureGpsWarm();
     showSummary();
   }
 }
@@ -4990,7 +4978,7 @@ function saveRoundAndHome() {
   }
   currentRound = null;
   stopAutoMarkWatch();
-  stopGPS();
+  ensureGpsWarm();
   showScreen("home");
   recordTestEvent("save_exit");
 }
@@ -5017,7 +5005,7 @@ function exitRoundAndSave() {
   unlockPocketLock();
   clearPocketLockIdle();
   stopAutoMarkWatch();
-  stopGPS();
+  ensureGpsWarm();
   if (currentRound && roundHasProgress(currentRound)) {
     currentRound.partial = true;
     currentRound.completed = false;
@@ -5040,7 +5028,7 @@ function confirmExitRound() {
     if (confirm("Leave this round? Nothing to save yet.")) {
       clearPocketLockIdle();
       stopAutoMarkWatch();
-      stopGPS();
+      ensureGpsWarm();
       currentRound = null;
       showScreen("home");
     }
@@ -5054,7 +5042,7 @@ function exitRoundDiscard() {
   unlockPocketLock();
   clearPocketLockIdle();
   stopAutoMarkWatch();
-  stopGPS();
+  ensureGpsWarm();
   // In-memory play uses a clone when resumed; leaving rounds[] untouched discards edits.
   // Brand-new unsaved rounds were never inserted until save.
   currentRound = null;
@@ -5142,7 +5130,7 @@ function onHardwareBack() {
     if (confirm("Save this round?")) saveRoundAndHome();
     else {
       stopAutoMarkWatch();
-      stopGPS();
+      ensureGpsWarm();
       currentRound = null;
       showScreen("home");
     }
@@ -5262,8 +5250,23 @@ function mockAtPin() {
   applyMockPosition(moveByMeters(base.lat, base.lon, 150, 20));
 }
 
+/** Keep high-accuracy GPS watch running while the app is open (settle / hone). */
+function ensureGpsWarm() {
+  if (watchId != null || mockGpsActive) return;
+  startGPS();
+}
+
+function setGpsStatusText(text, cls) {
+  const status = document.getElementById("gps-status");
+  if (!status) return;
+  status.textContent = text;
+  if (cls) status.className = cls;
+}
+
 function startGPS() {
-  stopGPS();
+  // Already watching — keep the warm session (restarting drops settle quality)
+  if (watchId != null) return;
+
   mockGpsActive = false;
   const bar = document.getElementById("mock-gps-bar");
   if (bar) bar.classList.remove("show");
@@ -5278,23 +5281,18 @@ function startGPS() {
   }
 
   if (!window.isSecureContext) {
-    document.getElementById("gps-status").textContent =
-      "GPS needs https or localhost (see Phone Setup on home)";
-    document.getElementById("gps-status").className = "status warn";
+    setGpsStatusText("GPS needs https or localhost (see Phone Setup on home)", "status warn");
     return;
   }
   if (!navigator.geolocation) {
-    document.getElementById("gps-status").textContent = "Geolocation not supported";
-    document.getElementById("gps-status").className = "status warn";
+    setGpsStatusText("Geolocation not supported", "status warn");
     return;
   }
 
-  document.getElementById("gps-status").textContent = "Waiting for GPS…";
-  document.getElementById("gps-status").className = "status";
+  setGpsStatusText("Waiting for GPS…", "status");
 
   watchId = navigator.geolocation.watchPosition(
     pos => {
-      // Real fix arrived — leave mock mode if we somehow had it
       mockGpsActive = false;
       if (bar) bar.classList.remove("show");
 
@@ -5306,19 +5304,18 @@ function startGPS() {
       updateTeeHandoffTracking(currentPosition);
       maybeUpdateNearestHoleWhileWaiting();
       maybeBeginTeeChime();
-      const status = document.getElementById("gps-status");
 
       if (accuracy > sens("gpsMaxAccuracyM")) {
-        status.textContent = `GPS settling (±${Math.round(accuracy)} m)`;
-        status.className = "status warn";
+        setGpsStatusText(`GPS settling (±${Math.round(accuracy)} m)`, "status warn");
       } else if (accuracy > 25) {
-        status.textContent = `GPS good-ish (±${Math.round(accuracy)} m)`;
-        status.className = "status warn";
+        setGpsStatusText(`GPS good-ish (±${Math.round(accuracy)} m)`, "status warn");
       } else {
-        status.textContent = `GPS good (±${Math.round(accuracy)} m)`;
-        status.className = "status good";
+        setGpsStatusText(`GPS good (±${Math.round(accuracy)} m)`, "status good");
       }
 
+      if (document.getElementById("screen-home")?.classList.contains("active")) {
+        updateCourseSuggestBanner();
+      }
       updateLiveDistance();
       updateAutoMarkCountdownUI();
       updateGpsDiagUI();
@@ -5329,24 +5326,37 @@ function startGPS() {
     },
     err => {
       console.warn("GPS error:", err);
-      // Phones (or ?mock=0): stay on real GPS path — show error, do not swap to mock
       if (forceReal || isLikelyPhone()) {
-        const status = document.getElementById("gps-status");
-        status.textContent = "GPS error: " + (err.message || err.code) + " — allow Location for this site";
-        status.className = "status warn";
+        setGpsStatusText(
+          "GPS error: " + (err.message || err.code) + " — allow Location for this site",
+          "status warn"
+        );
         showToast("Enable Location for this site to use real GPS");
         return;
       }
-      // Laptop / desktop: fall back to mock for UI testing
       enableMockGps("No GPS on this device — mock GPS for testing");
     },
-    { enableHighAccuracy: true, maximumAge: 1000, timeout: 15000 }
+    { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 }
   );
 
+  // Kick a fresh fix immediately (helps hone before first round)
   try {
-    navigator.geolocation.getCurrentPosition(() => {}, () => {}, {
-      enableHighAccuracy: true, maximumAge: 0, timeout: 10000
-    });
+    navigator.geolocation.getCurrentPosition(
+      pos => {
+        const raw = {
+          lat: pos.coords.latitude,
+          lon: pos.coords.longitude,
+          accuracy: pos.coords.accuracy
+        };
+        currentPosition = raw;
+        ingestGpsFix(raw);
+        if (document.getElementById("screen-home")?.classList.contains("active")) {
+          updateCourseSuggestBanner();
+        }
+      },
+      () => {},
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 12000 }
+    );
   } catch (_) {}
 }
 
@@ -5740,15 +5750,13 @@ function resumePartialRound(roundId) {
   resetTeeHandoffState();
   lastNearPinPos = null;
   lastPosBeforeNextTee = null;
-  gpsRecentBuf = [];
-  gpsGoodBuf = [];
   lastGpsDeferReason = null;
   if (!currentRound.mode) currentRound.mode = currentRound.flexible ? "handsOff" : "classic";
   if (currentRound.mode === "handsOff") currentRound.flexible = true;
   document.getElementById("play-course-name").textContent =
     course.name + (currentRound.mode === "handsOff" ? " · Hands-off" : "");
   updatePlayUI();
-  startGPS();
+  ensureGpsWarm();
   if (settings.autoMark) startMotionDiagListener();
   if (settings.autoMark && !isTeeingOff) startAutoMarkWatch();
   showScreen("play");
@@ -8130,6 +8138,32 @@ function playMarkBeeps(n) {
   }
 }
 
+/** Soft three-note chime — sticky green-tap zone locked (mode changed). */
+function playGreenTapZoneChime() {
+  recordTestEvent("green_zone_chime");
+  if (!settings.autoMark || !settings.markSound || !settings.greenTapPutts) return;
+  ensureAudioCtx();
+  if (!audioCtx) return;
+  const notes = [784.0, 987.8, 1174.7]; // G5 → B5 → D6
+  notes.forEach((freq, i) => {
+    const t0 = audioCtx.currentTime + i * 0.14;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = "sine";
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(0.0001, t0);
+    gain.gain.exponentialRampToValueAtTime(0.14, t0 + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.16);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start(t0);
+    osc.stop(t0 + 0.18);
+  });
+  if (navigator.vibrate) {
+    try { navigator.vibrate([30, 50, 30, 50, 40]); } catch (_) {}
+  }
+}
+
 /** Softer two-note chime — next tee within 5 m (distinct from shot beeps). */
 function playTeeNearbyChime() {
   recordTestEvent("tee_chime");
@@ -8391,6 +8425,7 @@ function refreshGreenTapZone(now) {
         dwellMs,
         how: clearlyInside ? "clear" : "dwell"
       });
+      playGreenTapZoneChime();
       maybeShowCoachTip("green_tap", "#green-zone-line");
       return true;
     }
@@ -8776,6 +8811,7 @@ document.addEventListener("visibilitychange", () => {
     if (calRecording) requestCalWakeLock();
     if (pocketLocked && pocketLockDimmed) brightenPocketLock();
     else if (shouldHoldPlayWakeLock()) requestPlayWakeLock();
+    ensureGpsWarm();
   }
 });
 
@@ -10287,6 +10323,7 @@ applyTheme();
 armBackTrap();
 bindStarBadgeGestures();
 renderHome();
+ensureGpsWarm();
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
     navigator.serviceWorker.register("./service-worker.js?v=" + encodeURIComponent(APP_VERSION))
