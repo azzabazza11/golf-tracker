@@ -500,6 +500,37 @@
       display: flex;
       flex-direction: column;
     }
+    .course-card {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      cursor: pointer;
+    }
+    .course-card:active { opacity: 0.92; }
+    .course-card-main {
+      flex: 1;
+      min-width: 0;
+    }
+    .course-card-name {
+      font-weight: 600;
+      font-size: 18px;
+      line-height: 1.25;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .course-card-meta {
+      color: var(--muted);
+      font-size: 13px;
+      margin-top: 4px;
+      line-height: 1.35;
+    }
+    .course-card .btn-primary {
+      flex-shrink: 0;
+      padding: 12px 18px;
+      min-width: 72px;
+    }
+
     .map-toolbar {
       display: flex;
       flex-wrap: wrap;
@@ -1295,7 +1326,7 @@
 
     <div class="card">
       <button class="btn-primary" style="width:100%" onclick="showScreen('courses')">Courses</button>
-      <p class="modal-note" style="margin-top:10px;margin-bottom:0">Start a hands-off round from a course, or choose Manual. Nearby courses also appear above when GPS matches.</p>
+      <p class="modal-note" style="margin-top:10px;margin-bottom:0">Tap a course to set up map/tees, or Play for hands-off. Turn off auto-mark in Settings if you prefer manual marks in-game.</p>
     </div>
   </div>
 
@@ -1361,7 +1392,7 @@
       <div class="setting-row">
         <div class="setting-text">
           <strong>Hands-off preference</strong>
-          <span>Default new rounds to Hands-off (auto-mark + flexible holes). Turn off to prefer Manual from Courses.</span>
+          <span>Default new rounds to Hands-off (auto-mark + flexible holes). Turn off to start classic rounds from Play (Mark is always available in-game).</span>
         </div>
         <label class="switch">
           <input type="checkbox" id="setting-hands-off" onchange="onHandsOffToggle(this.checked)">
@@ -1833,7 +1864,7 @@
       <p class="modal-note"><strong>Min shot move</strong> — Swings too close to the last mark are ignored (practice swings).</p>
       <p class="modal-note"><strong>On the green</strong> — Near the pin, hybrid pauses (chime when green-tap locks). Three short phone taps mark a putt (not shakes). Calibrate taps in Settings. Once locked, the zone stays sticky past a GPS bump or a short roll off the green.</p>
       <p class="modal-note"><strong>Next tee / hole out</strong> — After leaving the green (no more taps), walk to the next tee. With Auto hole out on, the putt is marked at the pin and you advance (chime). Manual rounds can still use Hole Out.</p>
-      <p class="modal-note"><strong>Courses</strong> — Start from Courses: Play = hands-off, Manual = classic club pick. Nearby GPS match can begin auto tracker from home.</p>
+      <p class="modal-note"><strong>Courses</strong> — Tap a course to set up map/tees (Delete course is on that setup map only). Play starts hands-off; turn off auto-mark in Settings if you prefer marking shots yourself.</p>
       <p class="modal-note"><strong>Map circles</strong> — Tee: solid = near-tee; dashed = leave buffer. Green: solid = enter / lock green-tap; dashed = sticky leave (~150% of enter).</p>
       <p class="modal-note"><strong>Club suggest</strong> — If you haven’t picked a club, the app suggests your usual club for that hole/shot when known, otherwise a club for the distance to the pin. Highlighted = autofill — tap to change.</p>
       <p class="modal-note"><strong>Hole names</strong> — Optional: long-press a hole in the hole picker to set a custom name (default is Hole N).</p>
@@ -1888,6 +1919,7 @@
       <div class="map-toolbar" id="map-toolbar-photo">
         <button type="button" class="btn-danger" onclick="mapClearPhoto()">Clear photo</button>
         <button type="button" class="map-toggle" id="btn-map-walk-track" onclick="toggleWalkTrack()">Walk track</button>
+        <button type="button" class="btn-danger" id="btn-map-delete-course" style="display:none" onclick="deleteCourseFromMapSetup()">Delete course</button>
       </div>
       <div class="map-toolbar" id="map-manual-row">
         <button type="button" class="btn-primary" id="btn-map-lock" onclick="toggleMapLock()">Lock to photo</button>
@@ -1994,7 +2026,7 @@
   </div>
 
 <script>
-const APP_VERSION = "1.5.35";
+const APP_VERSION = "1.5.36";
 const PAGES_URL = "https://azzabazza11.github.io/golf-tracker/";
 const FEEDBACK_EMAIL = "aaron.callinan@gmail.com";
 const SUPPORT_URL = "https://ko-fi.com/aaroncallinan";
@@ -3961,22 +3993,18 @@ function renderCourses() {
     el.innerHTML = `<div class="empty">No courses yet.<br>Create one to get started.</div>`;
     return;
   }
-  el.innerHTML = courses.map(c => `
-    <div class="card">
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
-        <div style="min-width:0">
-          <div style="font-weight:600;font-size:18px">${escapeHtml(c.name)}</div>
-          <div style="color:var(--muted);font-size:13px">${c.holes.length} holes</div>
-        </div>
-        <div style="display:flex;gap:8px;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end">
-          <button class="btn-danger" style="padding:10px 12px" onclick="deleteCourse('${c.id}')">✕</button>
-          <button class="btn-secondary" style="padding:10px 12px" onclick="openCourseMapFromManager('${c.id}')">Map</button>
-          <button class="btn-secondary" style="padding:10px 12px" onclick="promptStartRound('${c.id}','classic')">Manual</button>
-          <button class="btn-primary" style="padding:10px 16px" onclick="promptStartRound('${c.id}','handsOff')">Play</button>
-        </div>
+  el.innerHTML = courses.map(c => {
+    const games = roundsForCourse(c.id).length;
+    const gamesLabel = games === 0 ? "No games yet" : (games === 1 ? "1 game played" : `${games} games played`);
+    return `
+    <div class="card course-card" onclick="openCourseMapFromManager('${c.id}')" role="button" tabindex="0">
+      <div class="course-card-main">
+        <div class="course-card-name">${escapeHtml(c.name)}</div>
+        <div class="course-card-meta">${c.holes.length} holes · ${gamesLabel}</div>
       </div>
-    </div>
-  `).join("");
+      <button type="button" class="btn-primary" onclick="event.stopPropagation(); promptStartRound('${c.id}')">Play</button>
+    </div>`;
+  }).join("");
 }
 
 function buildCourseMapRound(course) {
@@ -4008,8 +4036,31 @@ function openCourseMapFromManager(courseId) {
     course,
     persistRounds: false,
     mapRound,
-    returnScreen: "courses"
+    returnScreen: "courses",
+    courseSetup: true
   });
+}
+
+function isCourseSetupMap() {
+  return !!(mapSession && (mapSession.courseSetup || mapSession.returnScreen === "courses"));
+}
+
+function updateMapCourseSetupUI() {
+  const btn = document.getElementById("btn-map-delete-course");
+  if (btn) btn.style.display = isCourseSetupMap() ? "" : "none";
+}
+
+function deleteCourseFromMapSetup() {
+  if (!isCourseSetupMap() || !mapSession) return;
+  const id = mapSession.courseId;
+  const course = courses.find(c => c.id === id);
+  if (!course) return;
+  if (!confirm(`Delete "${course.name}"? This cannot be undone.`)) return;
+  closeMapModal();
+  courses = courses.filter(c => c.id !== id);
+  saveData();
+  renderCourses();
+  showToast("Course deleted");
 }
 
 function deleteCourse(id) {
@@ -6039,6 +6090,7 @@ async function openMapSession(session) {
   updateMapLockUI();
   updateMapHoleNavButtons();
   updateMapWalkTrackButton();
+  updateMapCourseSetupUI();
   maybeShowCoachTip("map_zones", "#map-canvas, #modal-map .modal-content");
   await ensureCourseDefaultPhoto(session.courseId, session.course.holes.length);
   await loadMapImageForSession();
@@ -6150,6 +6202,8 @@ function closeMapModal() {
   mapTapMode = null;
   mapManualAlign = false;
   pendingMapImageFile = null;
+  const delBtn = document.getElementById("btn-map-delete-course");
+  if (delBtn) delBtn.style.display = "none";
   if (mapImageUrl) {
     URL.revokeObjectURL(mapImageUrl);
     mapImageUrl = null;
