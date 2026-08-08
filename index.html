@@ -1286,10 +1286,6 @@
     </div>
 
     <div class="card">
-      <button class="btn-primary" style="width:100%" onclick="showScreen('courses')">Start Round</button>
-    </div>
-
-    <div class="card">
       <h3 class="recent-rounds-heading" style="margin-bottom:12px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:8px" onclick="showScreen('rounds')" role="button" tabindex="0">
         <span>Recent Rounds</span>
         <span style="font-size:13px;font-weight:500;color:var(--muted)">All →</span>
@@ -1298,7 +1294,8 @@
     </div>
 
     <div class="card">
-      <button class="btn-secondary" style="width:100%" onclick="showScreen('courses')">Manage Courses</button>
+      <button class="btn-primary" style="width:100%" onclick="showScreen('courses')">Courses</button>
+      <p class="modal-note" style="margin-top:10px;margin-bottom:0">Start a hands-off round from a course, or choose Manual. Nearby courses also appear above when GPS matches.</p>
     </div>
   </div>
 
@@ -1364,10 +1361,20 @@
       <div class="setting-row">
         <div class="setting-text">
           <strong>Hands-off preference</strong>
-          <span>Default new rounds to Hands-off: start near a known tee, flexible hole count, audio cues.</span>
+          <span>Default new rounds to Hands-off (auto-mark + flexible holes). Turn off to prefer Manual from Courses.</span>
         </div>
         <label class="switch">
           <input type="checkbox" id="setting-hands-off" onchange="onHandsOffToggle(this.checked)">
+          <span class="slider"></span>
+        </label>
+      </div>
+      <div class="setting-row">
+        <div class="setting-text">
+          <strong>Auto hole out</strong>
+          <span>After leaving the green (no more green taps) and reaching the next tee, mark hole-out at the pin and advance. Default on.</span>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="setting-auto-hole-out" onchange="onAutoHoleOutToggle(this.checked)">
           <span class="slider"></span>
         </label>
       </div>
@@ -1825,7 +1832,8 @@
       <p class="modal-note"><strong>Fairway auto-mark</strong> — Stand still until armed, then your swing marks at that GPS spot. Walking away only plays a confirm chime (it does not wait to mark).</p>
       <p class="modal-note"><strong>Min shot move</strong> — Swings too close to the last mark are ignored (practice swings).</p>
       <p class="modal-note"><strong>On the green</strong> — Near the pin, hybrid pauses (chime when green-tap locks). Three short phone taps mark a putt (not shakes). Calibrate taps in Settings. Once locked, the zone stays sticky past a GPS bump or a short roll off the green.</p>
-      <p class="modal-note"><strong>Next tee</strong> — After hole-out, walk to the next tee (solid white circle), stop, then auto-tee. Don’t expect tee-off on the previous green.</p>
+      <p class="modal-note"><strong>Next tee / hole out</strong> — After leaving the green (no more taps), walk to the next tee. With Auto hole out on, the putt is marked at the pin and you advance (chime). Manual rounds can still use Hole Out.</p>
+      <p class="modal-note"><strong>Courses</strong> — Start from Courses: Play = hands-off, Manual = classic club pick. Nearby GPS match can begin auto tracker from home.</p>
       <p class="modal-note"><strong>Map circles</strong> — Tee: solid = near-tee; dashed = leave buffer. Green: solid = enter / lock green-tap; dashed = sticky leave (~150% of enter).</p>
       <p class="modal-note"><strong>Club suggest</strong> — If you haven’t picked a club, the app suggests your usual club for that hole/shot when known, otherwise a club for the distance to the pin. Highlighted = autofill — tap to change.</p>
       <p class="modal-note"><strong>Hole names</strong> — Optional: long-press a hole in the hole picker to set a custom name (default is Hole N).</p>
@@ -1986,7 +1994,7 @@
   </div>
 
 <script>
-const APP_VERSION = "1.5.34";
+const APP_VERSION = "1.5.35";
 const PAGES_URL = "https://azzabazza11.github.io/golf-tracker/";
 const FEEDBACK_EMAIL = "aaron.callinan@gmail.com";
 const SUPPORT_URL = "https://ko-fi.com/aaroncallinan";
@@ -2191,7 +2199,8 @@ function loadSettings() {
       pocketLockAuto: s.pocketLockAuto !== false,
       testMode: !!s.testMode,
       testUnlocked: !!s.testUnlocked,
-      handsOff: !!s.handsOff,
+      handsOff: s.handsOff !== false,
+      autoHoleOut: s.autoHoleOut !== false,
       greenTapPutts: s.greenTapPutts !== false,
       achievementsEnabled: s.achievementsEnabled !== false,
       coachTips: s.coachTips !== false,
@@ -2215,7 +2224,8 @@ function loadSettings() {
       pocketLockAuto: true,
       testMode: false,
       testUnlocked: false,
-      handsOff: false,
+      handsOff: true,
+      autoHoleOut: true,
       greenTapPutts: true,
       achievementsEnabled: true,
       coachTips: true,
@@ -2321,6 +2331,8 @@ let greenTapArmUntil = 0;     // ignore taps until this time after sticky lock
 let greenTapLocked = false;   // sticky ON GREEN — hysteresis until leave confirm
 let greenTapEnterSince = 0;   // candidate: first time d ≤ enterM
 let greenTapLeaveSince = 0;   // locked: first time d > leaveM
+let greenTapHadLockThisHole = false;    // entered sticky green this hole
+let greenTapExitedAfterLock = false;    // left sticky green (eligible for auto hole-out)
 let greenTapSpikeActive = false;
 let greenTapSpikeStart = 0;
 let greenTapSpikePeak = 0;
@@ -3959,8 +3971,8 @@ function renderCourses() {
         <div style="display:flex;gap:8px;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end">
           <button class="btn-danger" style="padding:10px 12px" onclick="deleteCourse('${c.id}')">✕</button>
           <button class="btn-secondary" style="padding:10px 12px" onclick="openCourseMapFromManager('${c.id}')">Map</button>
-          <button class="btn-secondary" style="padding:10px 12px" onclick="promptStartRound('${c.id}','classic')">Classic</button>
-          <button class="btn-primary" style="padding:10px 16px" onclick="promptStartRound('${c.id}','handsOff')">Hands-off</button>
+          <button class="btn-secondary" style="padding:10px 12px" onclick="promptStartRound('${c.id}','classic')">Manual</button>
+          <button class="btn-primary" style="padding:10px 16px" onclick="promptStartRound('${c.id}','handsOff')">Play</button>
         </div>
       </div>
     </div>
@@ -4864,6 +4876,7 @@ function advanceAfterHoleOut(opts) {
   if (!keepLock) unlockPocketLock();
   stopAutoMarkWatch();
   resetTeeHandoffState();
+  resetGreenTapHoleFlags();
   lastNearPinPos = null;
   lastPosBeforeNextTee = null;
   beginTeeChimedHole = null;
@@ -4900,7 +4913,7 @@ function holeOut() {
   }
 
   stopAutoMarkWatch();
-  resetGreenTapZoneState();
+  resetGreenTapHoleFlags();
 
   const hole = currentRound.holes[currentHoleIndex];
   const from = { ...anchorPosition };
@@ -4921,6 +4934,7 @@ function holeOut() {
   if (shotNum === 1) recordDrive(from, to);
 
   noteMarkEvent();
+  playHoleOutChime();
   anchorPosition = { lat: to.lat, lon: to.lon };
   clubForCurrentShot = null;
   pendingShotPosition = null;
@@ -7363,7 +7377,9 @@ function renderSettings() {
     snd.checked = !!settings.markSound;
     snd.disabled = !settings.autoMark;
   }
-  if (hands) hands.checked = !!settings.handsOff;
+  if (hands) hands.checked = settings.handsOff !== false;
+  const autoHoleOut = document.getElementById("setting-auto-hole-out");
+  if (autoHoleOut) autoHoleOut.checked = settings.autoHoleOut !== false;
   if (greenTap) greenTap.checked = !!settings.greenTapPutts;
   if (achievements) achievements.checked = !!settings.achievementsEnabled;
   const coachTips = document.getElementById("setting-coach-tips");
@@ -7911,7 +7927,14 @@ function onHandsOffToggle(on) {
   settings.handsOff = !!on;
   saveSettings();
   renderSettings();
-  showToast(on ? "Hands-off preferred for new rounds" : "Classic preferred for new rounds");
+  showToast(on ? "Hands-off preferred for new rounds" : "Manual preferred for new rounds");
+}
+
+function onAutoHoleOutToggle(on) {
+  settings.autoHoleOut = !!on;
+  saveSettings();
+  renderSettings();
+  showToast(on ? "Auto hole out on" : "Auto hole out off — use Hole Out");
 }
 
 function onGreenTapToggle(on) {
@@ -8138,6 +8161,32 @@ function playMarkBeeps(n) {
   }
 }
 
+/** Soft descending chime — hole completed. */
+function playHoleOutChime() {
+  recordTestEvent("hole_out_chime");
+  if (!settings.markSound) return;
+  ensureAudioCtx();
+  if (!audioCtx) return;
+  const notes = [659.25, 523.25, 392.0]; // E5 → C5 → G4
+  notes.forEach((freq, i) => {
+    const t0 = audioCtx.currentTime + i * 0.2;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = "triangle";
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(0.0001, t0);
+    gain.gain.exponentialRampToValueAtTime(0.15, t0 + 0.025);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.22);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start(t0);
+    osc.stop(t0 + 0.24);
+  });
+  if (navigator.vibrate) {
+    try { navigator.vibrate([50, 70, 50, 70, 90]); } catch (_) {}
+  }
+}
+
 /** Soft three-note chime — sticky green-tap zone locked (mode changed). */
 function playGreenTapZoneChime() {
   recordTestEvent("green_zone_chime");
@@ -8358,6 +8407,12 @@ function resetGreenTapZoneState(clearTaps) {
   }
 }
 
+function resetGreenTapHoleFlags() {
+  greenTapHadLockThisHole = false;
+  greenTapExitedAfterLock = false;
+  resetGreenTapZoneState();
+}
+
 /**
  * Sticky green zone: confirm enter (dwell or clearly inside), then stay locked
  * until outside leave radius (~150% of on-green) for leave-confirm ms.
@@ -8393,6 +8448,7 @@ function refreshGreenTapZone(now) {
           accuracy: Math.round(acc * 10) / 10,
           outsideMs: now - greenTapLeaveSince
         });
+        if (greenTapHadLockThisHole) greenTapExitedAfterLock = true;
         resetGreenTapZoneState();
         return false;
       }
@@ -8410,6 +8466,8 @@ function refreshGreenTapZone(now) {
     if (clearlyInside || dwellOk) {
       const dwellMs = greenTapEnterSince ? now - greenTapEnterSince : 0;
       greenTapLocked = true;
+      greenTapHadLockThisHole = true;
+      greenTapExitedAfterLock = false;
       greenTapEnterSince = 0;
       greenTapLeaveSince = 0;
       greenTapTimes = [];
@@ -8953,6 +9011,19 @@ function checkTeeHandoffProximity() {
 }
 
 function resolveAutoHoleOutPosition(hole, nextTee) {
+  // Prefer mapped pin — user asked for hole-out at pin location
+  const pin = getPin(currentHoleIndex);
+  if (pin && pin.lat != null && pin.lon != null) {
+    if (nextTee) {
+      const d = haversine(pin.lat, pin.lon, nextTee.lat, nextTee.lon);
+      if (d >= 20) {
+        return { lat: pin.lat, lon: pin.lon, accuracy: pin.accuracy || null, fromPin: true };
+      }
+    } else {
+      return { lat: pin.lat, lon: pin.lon, accuracy: pin.accuracy || null, fromPin: true };
+    }
+  }
+
   const candidates = [];
   if (lastNearPinPos) candidates.push(lastNearPinPos);
   if (hole?.shots?.length) {
@@ -8972,8 +9043,17 @@ function resolveAutoHoleOutPosition(hole, nextTee) {
   return null;
 }
 
+/** Ready for auto hole-out: left green / quiet taps (or never used green-tap this hole). */
+function readyForAutoHoleOut() {
+  if (!settings.autoHoleOut || !settings.autoMark) return false;
+  if (greenTapLocked || greenTapBumpCount > 0) return false;
+  if (settings.greenTapPutts && greenTapHadLockThisHole && !greenTapExitedAfterLock) return false;
+  return true;
+}
+
 function autoHoleOutSilent(nextTee) {
   if (!currentRound || isTeeingOff) return false;
+  if (!readyForAutoHoleOut()) return false;
   const hole = currentRound.holes[currentHoleIndex];
   if (!hole || holeHasHoleOut(hole)) return false;
   if (!anchorPosition) return false;
@@ -8989,7 +9069,9 @@ function autoHoleOutSilent(nextTee) {
   hole.shots.push({
     number: shotNum,
     distance,
-    club: clubForCurrentShot || "Putter",
+    club: "Putter",
+    clubGuess: true,
+    clubSuggest: "range",
     from,
     to,
     auto: true,
@@ -8999,13 +9081,18 @@ function autoHoleOutSilent(nextTee) {
   if (shotNum === 1) recordDrive(from, to);
 
   noteMarkEvent();
+  playHoleOutChime();
   anchorPosition = { lat: to.lat, lon: to.lon };
   clubForCurrentShot = null;
+  clubForCurrentShotAuto = false;
+  clubSuggestSource = null;
   pendingShotPosition = null;
   selectedClub = null;
+  resetGreenTapHoleFlags();
 
   tryRecordPinMark(to, { silent: true });
   checkHoleScoreRecords();
+  showToast(toPos.fromPin ? "Hole out · at pin" : "Hole out · auto");
   return true;
 }
 
@@ -9084,11 +9171,26 @@ function completeTeeHandoff(target) {
   try {
     if (target.mode === "nextTee") {
       const nextTee = target.tee;
-      if (!autoHoleOutSilent(nextTee)) {
-        showToast("Near next tee — hole out manually if putt GPS missing");
-        teeHandoffChimed = true;
-        teeHandoffFailUntil = Date.now() + 45000;
-        return;
+      const hole = currentRound.holes[currentHoleIndex];
+      if (!holeHasHoleOut(hole)) {
+        if (!settings.autoHoleOut) {
+          showToast("Near next tee — hole out manually (auto hole out off)");
+          teeHandoffChimed = true;
+          teeHandoffFailUntil = Date.now() + 45000;
+          return;
+        }
+        if (!readyForAutoHoleOut()) {
+          showToast("Finish the green first — leave green / taps, then approach next tee");
+          teeHandoffChimed = true;
+          teeHandoffFailUntil = Date.now() + 20000;
+          return;
+        }
+        if (!autoHoleOutSilent(nextTee)) {
+          showToast("Near next tee — hole out manually if pin GPS missing");
+          teeHandoffChimed = true;
+          teeHandoffFailUntil = Date.now() + 45000;
+          return;
+        }
       }
       if (currentHoleIndex >= currentRound.holes.length - 1) {
         advanceAfterHoleOut({ keepLock: false });
