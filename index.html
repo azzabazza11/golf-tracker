@@ -10667,6 +10667,13 @@ window.addEventListener("appinstalled", () => {
   deferredInstallPrompt = null;
   updateInstallButton();
 });
+try {
+  if (new URLSearchParams(location.search).get("install") === "1") {
+    const tryInstall = () => promptInstallApp();
+    window.addEventListener("beforeinstallprompt", () => setTimeout(tryInstall, 50), { once: true });
+    setTimeout(tryInstall, 600);
+  }
+} catch (_) {}
 runSplash();
 </script>
 </body>
