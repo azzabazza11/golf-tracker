@@ -1,7 +1,8 @@
 {
+  "id": "https://azzabazza11.github.io/golf-tracker/",
   "name": "Golf Shot Tracker",
   "short_name": "Shot Tracker",
-  "start_url": "./",
+  "start_url": "./?homescreen=1",
   "scope": "./",
   "display": "standalone",
   "background_color": "#0f1419",
