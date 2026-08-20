@@ -1,0 +1,19 @@
+{
+  "id": "golf-tracker",
+  "title": "Golf Shot Tracker",
+  "version": "1.5.39",
+  "category": "Sports",
+  "desc": "Track shot distances with GPS on the course. Tee off, mark, hole out — rounds stay on your device, no account needed.",
+  "accent": "#2ecc71",
+  "icon": "⛳",
+  "platforms": ["android", "ios", "desktop"],
+  "status": "live",
+  "installable": true,
+  "desktopUrl": "https://azzabazza11.github.io/golf-tracker/",
+  "appUrl": "https://azzabazza11.github.io/golf-tracker/",
+  "tags": ["golf", "gps", "sports", "pwa"],
+  "changelog": [
+    {"version": "1.5.39", "date": "2026-08-17", "notes": "Fix PWA install when opened from Aaron's Apps hub."},
+    {"version": "1.5.38", "date": "2026-08-13", "notes": "Honor ?install=1 from the apps hub to open the install prompt."}
+  ]
+}
