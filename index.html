@@ -2167,7 +2167,7 @@
   </div>
 
 <script>
-const APP_VERSION = "1.5.39";
+const APP_VERSION = "1.5.40";
 const PAGES_URL = "https://azzabazza11.github.io/golf-tracker/";
 const FEEDBACK_EMAIL = "aaron.callinan@gmail.com";
 const SUPPORT_URL = "https://ko-fi.com/aaroncallinan";
@@ -2748,7 +2748,8 @@ function teeToPinLengthM(holeIndex) {
   const idx = holeIndex == null ? currentHoleIndex : holeIndex;
   const pin = getPin(idx);
   const hole = currentRound && currentRound.holes[idx];
-  const tee = hole && hole.teePosition;
+  const tee = (hole && hole.teePosition) ||
+    (currentRound && courseTeeForHole(currentRound.courseId, idx));
   if (!tee || !pin) return null;
   return haversine(tee.lat, tee.lon, pin.lat, pin.lon);
 }
@@ -3854,6 +3855,7 @@ function ensureCourseHole(index, course) {
   const h = c.holes[index];
   if (!h.drives) h.drives = [];
   if (h.pin === undefined) h.pin = null;
+  if (h.tee === undefined) h.tee = null;
   if (!h.mapAlign) h.mapAlign = { ...DEFAULT_MAP_ALIGN };
   if (!h.mapView) h.mapView = { ...DEFAULT_MAP_VIEW };
   if (h.mapLocked == null) h.mapLocked = false;
@@ -3884,6 +3886,27 @@ function setHoleCustomName(holeIndex, name) {
 function getPin(index) {
   const h = ensureCourseHole(index);
   return h && h.pin ? h.pin : null;
+}
+
+function courseById(courseId) {
+  if (currentCourse && currentCourse.id === courseId) return currentCourse;
+  if (mapSession && mapSession.course && mapSession.course.id === courseId) return mapSession.course;
+  return courses.find(c => c.id === courseId) || null;
+}
+
+/** Mapped tee GPS for a hole (long-press Set tee) — not the same as this round's tee-off. */
+function courseTeeForHole(courseId, holeIndex) {
+  const course = courseById(courseId);
+  const h = course && ensureCourseHole(holeIndex, course);
+  return h && h.tee && h.tee.lat != null ? h.tee : null;
+}
+
+function mapModalIsOpen() {
+  return !!document.getElementById("modal-map")?.classList.contains("active");
+}
+
+function isLiveMapRoundHole(rh) {
+  return !!(currentRound && rh && currentRound.holes[currentHoleIndex] === rh);
 }
 
 function distanceToPin(fromPos, holeIndex) {
@@ -5814,6 +5837,8 @@ function neighborRoundId(round, delta) {
 function knownTeeForHole(courseId, holeIndex, roundHole) {
   if (roundHole?.teePosition) return roundHole.teePosition;
   if (roundHole?.shots?.[0]?.from) return roundHole.shots[0].from;
+  const mapped = courseTeeForHole(courseId, holeIndex);
+  if (mapped) return mapped;
   const list = roundsForCourse(courseId);
   for (let i = list.length - 1; i >= 0; i--) {
     const h = list[i].holes?.[holeIndex];
@@ -6265,12 +6290,13 @@ function isOneHitToGreen(roundHole, pin) {
 function collectMapPoints(roundHole, courseHole, courseId, holeIndex, opts) {
   const pin = courseHole && courseHole.pin ? courseHole.pin : null;
   let tee = roundHole?.teePosition || (roundHole?.shots?.[0]?.from) || null;
+  const cid = courseId || (mapSession && mapSession.courseId);
+  const idx = holeIndex != null ? holeIndex : (mapSession && mapSession.holeIndex);
+  if (!tee && courseHole && courseHole.tee && courseHole.tee.lat != null) {
+    tee = courseHole.tee;
+  }
   if (!tee && !(opts && opts.skipHistoryTee)) {
-    tee = knownTeeForHole(
-      courseId || (mapSession && mapSession.courseId),
-      holeIndex != null ? holeIndex : (mapSession && mapSession.holeIndex),
-      roundHole
-    );
+    tee = knownTeeForHole(cid, idx, roundHole);
   }
   const shots = [];
   if (roundHole?.shots) {
@@ -6563,7 +6589,8 @@ function updateMapStatusLine() {
       : "No photo";
   if (calib && calib.tee && calib.pin) {
     const hole = mapSession.roundHole;
-    if (hole?.teePosition && h.pin) {
+    const gpsTee = (hole && hole.teePosition) || (h && h.tee);
+    if (gpsTee && h.pin) {
       el.textContent = `${photoBit} · calibrated · long-press Set tee/pin to snap GPS to your feet`;
     } else {
       el.textContent = `${photoBit} · photo tee/pin set — Tee Off & Hole Out later, or long-press Set tee/pin at GPS`;
@@ -6626,7 +6653,8 @@ function holeHasGpsCalib(holeIndex) {
   const h = ensureCourseHole(holeIndex, mapSession.course);
   const round = getMapSessionRound();
   const rh = round?.holes?.[holeIndex];
-  return !!(h?.photoCalib?.tee && h?.photoCalib?.pin && rh?.teePosition && h.pin);
+  const gpsTee = (rh && rh.teePosition) || (h && h.tee);
+  return !!(h?.photoCalib?.tee && h?.photoCalib?.pin && gpsTee && h.pin);
 }
 
 /** Keep course-photo pan/zoom shared across holes while setting tee/pin. */
@@ -6863,7 +6891,7 @@ function gpsTargetsForCalib(cssW, cssH) {
   if (!mapSession || !mapFit) return null;
   const hole = mapSession.roundHole;
   const courseHole = ensureCourseHole(mapSession.holeIndex, mapSession.course);
-  const teeGps = hole.teePosition;
+  const teeGps = (hole && hole.teePosition) || (courseHole && courseHole.tee);
   const pinGps = courseHole && courseHole.pin;
   if (!teeGps || !pinGps) return null;
   const origin = { lat: teeGps.lat, lon: teeGps.lon };
@@ -6927,6 +6955,79 @@ function startMapTapMode(kind) {
   updateMapLockUI();
 }
 
+/** Recompute GPS→canvas fit so photo calib can snap to the just-written tee/pin. */
+function rebuildMapFitFromGps() {
+  const wrap = document.getElementById("map-canvas-wrap");
+  if (!wrap || !mapSession) return false;
+  const cssW = wrap.clientWidth;
+  const cssH = Math.max(wrap.clientHeight, 240);
+  const courseHole = ensureCourseHole(mapSession.holeIndex, mapSession.course);
+  const pts = collectMapPoints(
+    mapSession.roundHole,
+    courseHole,
+    mapSession.courseId,
+    mapSession.holeIndex,
+    { skipHistoryTee: true }
+  );
+  const youPos = currentPosition && currentPosition.lat != null
+    ? { lat: currentPosition.lat, lon: currentPosition.lon }
+    : null;
+  const origin = pts.tee
+    || pts.green
+    || youPos;
+  mapGeoOrigin = origin || null;
+  if (!origin) {
+    mapFit = computeMapFit([], cssW, cssH);
+    return false;
+  }
+  const meterPts = [];
+  if (pts.tee) meterPts.push(latLonToMeters(origin, pts.tee));
+  if (pts.green) meterPts.push(latLonToMeters(origin, pts.green));
+  if (youPos) meterPts.push(latLonToMeters(origin, youPos));
+  mapFit = computeMapFit(meterPts.length ? meterPts : [], cssW, cssH);
+  return true;
+}
+
+/** Shift photo so the tapped T sits on the GPS tee (used when pin GPS is not ready). */
+function nudgePhotoTeeToGps() {
+  if (!mapSession || !mapFit || !mapGeoOrigin) return false;
+  const h = ensureCourseHole(mapSession.holeIndex, mapSession.course);
+  if (!h?.photoCalib?.tee) return false;
+  const wrap = document.getElementById("map-canvas-wrap");
+  if (!wrap) return false;
+  const cssW = wrap.clientWidth;
+  const cssH = Math.max(wrap.clientHeight, 240);
+  const teeGps = (mapSession.roundHole && mapSession.roundHole.teePosition) || h.tee;
+  if (!teeGps || teeGps.lat == null) return false;
+  const Ft = metersToCanvas(latLonToMeters(mapGeoOrigin, teeGps), mapFit);
+  const align = getMapAlign();
+  const Lt = photoLocalToCanvas(h.photoCalib.tee, align, cssW, cssH);
+  if (!Lt) return false;
+  const dx = Ft.x - Lt.x;
+  const dy = Ft.y - Lt.y;
+  if (Math.hypot(dx, dy) < 0.5) return true;
+  align.offsetX = (align.offsetX || 0) + dx;
+  align.offsetY = (align.offsetY || 0) + dy;
+  h.mapAlign = align;
+  return true;
+}
+
+function applyMapGpsCalibNow(kind) {
+  rebuildMapFitFromGps();
+  const hole = ensureCourseHole(mapSession.holeIndex, mapSession.course);
+  if (applyPhotoCalibToAlign()) {
+    hole.mapView = { ...DEFAULT_MAP_VIEW };
+    persistMapAlign();
+    return kind === "tee" ? "Tee GPS updated — map re-aligned" : "Pin GPS updated — map re-aligned";
+  }
+  if (kind === "tee" && nudgePhotoTeeToGps()) {
+    persistMapAlign();
+    return "Tee GPS set — photo tee aligned to your position";
+  }
+  persistMapAlign();
+  return null;
+}
+
 /** Long-press Set tee / Set pin: write GPS at your feet (calibrate map vs blue accuracy circle). */
 function setMapGpsAtCurrentPosition(kind) {
   if (!mapSession) return;
@@ -6950,16 +7051,19 @@ function setMapGpsAtCurrentPosition(kind) {
       showToast("No round hole in map session");
       return;
     }
-    const prevClub = rh.teePosition && rh.teePosition.club;
-    rh.teePosition = { ...fix, club: prevClub || null };
-    if (currentRound && mapSession.roundId === currentRound.id && mapSession.holeIndex === currentHoleIndex) {
-      if (!isTeeingOff && (!anchorPosition || !rh.shots?.length)) {
-        anchorPosition = { lat: fix.lat, lon: fix.lon };
-      }
+    const ch = ensureCourseHole(mapSession.holeIndex, mapSession.course);
+    ch.tee = { ...fix };
+    // Live tee-off wait: mapped GPS must not count as this round's tee-off
+    if (!(isLiveMapRoundHole(rh) && isTeeingOff)) {
+      const prevClub = rh.teePosition && rh.teePosition.club;
+      rh.teePosition = { ...fix, club: prevClub || null };
     }
-    if (mapSession.persistRounds) saveData();
+    if (isLiveMapRoundHole(rh) && !isTeeingOff && (!anchorPosition || !rh.shots?.length)) {
+      anchorPosition = { lat: fix.lat, lon: fix.lon };
+    }
+    saveData();
     showToast("Tee GPS set to your position");
-    pushTestLog("map_gps_tee", { accuracy: fix.accuracy });
+    pushTestLog("map_gps_tee", { accuracy: fix.accuracy, mappedOnly: !!(isLiveMapRoundHole(rh) && isTeeingOff) });
   } else {
     const h = ensureCourseHole(mapSession.holeIndex, mapSession.course);
     h.pin = {
@@ -6976,16 +7080,8 @@ function setMapGpsAtCurrentPosition(kind) {
   }
 
   mapTapMode = null;
-  if (applyPhotoCalibToAlign()) {
-    const hole = ensureCourseHole(mapSession.holeIndex, mapSession.course);
-    hole.mapView = { ...DEFAULT_MAP_VIEW };
-    persistMapAlign();
-    showToast(kind === "tee"
-      ? "Tee GPS updated — map re-aligned"
-      : "Pin GPS updated — map re-aligned");
-  } else {
-    persistMapAlign();
-  }
+  const aligned = applyMapGpsCalibNow(kind);
+  if (aligned) showToast(aligned);
   updateMapLockUI();
   updateMapStatusLine();
   drawHoleMap();
@@ -7393,7 +7489,8 @@ function drawHoleMap() {
       youNearTee ? "rgba(255,255,255,0.12)" : "rgba(255,255,255,0.05)"
     );
   }
-  if (greenM && settings.greenTapPutts) {
+  const showGreenTapZone = !!(greenM && settings.greenTapPutts && !isTeeingOff && !youNearTee);
+  if (showGreenTapZone) {
     drawZoneCircle(
       greenM,
       greenRadii.leaveM,
@@ -8960,6 +9057,22 @@ function resetGreenTapHoleFlags() {
   resetGreenTapZoneState();
 }
 
+/** Keep green-tap from locking at the tee (photo overlay / short GPS pin must not pause auto-mark). */
+function nearTeeForGreenTapGuard() {
+  if (!currentRound) return false;
+  const hole = currentRound.holes[currentHoleIndex];
+  const tee = knownTeeForHole(currentRound.courseId, currentHoleIndex, hole);
+  const pos = greenTapLivePos();
+  if (!tee || !pos) return false;
+  const dTee = haversine(pos.lat, pos.lon, tee.lat, tee.lon);
+  const pin = getPin(currentHoleIndex);
+  if (pin && pin.lat != null) {
+    const dPin = haversine(pos.lat, pos.lon, pin.lat, pin.lon);
+    if (dPin + 8 < dTee) return false;
+  }
+  return dTee <= Math.max(sens("teeLeaveM"), sens("onGreenM"));
+}
+
 /**
  * Sticky green zone: confirm enter (dwell or clearly inside), then stay locked
  * until outside leave radius (~150% of on-green) for leave-confirm ms.
@@ -8968,6 +9081,10 @@ function resetGreenTapHoleFlags() {
 function refreshGreenTapZone(now) {
   now = now || Date.now();
   if (!settings.greenTapPutts || !settings.autoMark || !currentRound || isTeeingOff) {
+    if (greenTapLocked || greenTapEnterSince) resetGreenTapZoneState();
+    return false;
+  }
+  if (nearTeeForGreenTapGuard()) {
     if (greenTapLocked || greenTapEnterSince) resetGreenTapZoneState();
     return false;
   }
@@ -9056,7 +9173,7 @@ function metresToPin() {
 function updateGreenZoneUI() {
   const el = document.getElementById("green-zone-line");
   if (!el) return;
-  if (!settings.greenTapPutts || !settings.autoMark || !currentRound || isTeeingOff) {
+  if (!settings.greenTapPutts || !settings.autoMark || !currentRound || isTeeingOff || nearTeeForGreenTapGuard()) {
     el.classList.remove("show", "in-zone");
     el.textContent = "";
     return;
@@ -9452,9 +9569,12 @@ function holeHasHoleOut(hole) {
 function getTeeHandoffWatchTarget() {
   if (!settings.autoMark || !currentRound || !currentCourse) return null;
   if (getActiveScreenId() !== "play") return null;
+  if (mapModalIsOpen()) return null;
   if (teeHandoffInProgress) return null;
 
   if (isTeeingOff) {
+    // First tee of a new round is Begin Round — do not silent-tee from mapped/long-press GPS
+    if (roundAwaitingFirstTee()) return null;
     const tee = knownTeeForHole(
       currentRound.courseId,
       currentHoleIndex,
