@@ -1950,10 +1950,10 @@
   <div id="modal-help" class="modal" onclick="if(event.target===this)closeModal()">
     <div class="modal-content" onclick="event.stopPropagation()" style="max-height:85vh;overflow:auto">
       <h3 style="margin-bottom:10px">Help</h3>
-      <p class="modal-note"><strong>Fairway auto-mark</strong> — After tee-off or a marked shot, settle stays quiet until you walk Min shot move away (to the ball). Then stand still until armed; your swing marks at that GPS spot. Walking away only plays a confirm chime (it does not wait to mark).</p>
-      <p class="modal-note"><strong>Min shot move</strong> — Settle/arm does not start, and swings too close to the last mark are ignored, until you have moved this far.</p>
+      <p class="modal-note"><strong>Fairway auto-mark</strong> — After tee-off or a marked shot, settle stays quiet until GPS is accurate, you have left the tee box, and you have walked Min shot move away (to the ball). Then stand still until armed; your swing marks at that GPS spot. Walking away only plays a confirm chime (it does not wait to mark).</p>
+      <p class="modal-note"><strong>Min shot move</strong> — Settle/arm does not start, and swings too close to the last mark are ignored, until you have moved this far. Inaccurate GPS or still standing on the tee will not start settle.</p>
       <p class="modal-note"><strong>On the green</strong> — Near the pin, hybrid pauses (chime when green-tap locks). Three short phone taps mark a putt (not shakes). Calibrate taps in Settings. Once locked, the zone stays sticky past a GPS bump or a short roll off the green.</p>
-      <p class="modal-note"><strong>Next tee / hole out</strong> — After leaving the green (no more taps), walk to the next tee. Tap <strong>Walk to next tee</strong> / <strong>Set tee here</strong> to save tee GPS and line up the map (needed on a first round). With Auto hole out on, the putt is marked at the pin and you advance (chime). Manual rounds can still use Hole Out.</p>
+      <p class="modal-note"><strong>Next tee / hole out</strong> — After leaving the green (no more taps), walk to the next tee. Auto tee waits for an accurate GPS fix inside the tee box before the stop-to-tee-off settle starts. Tap <strong>Walk to next tee</strong> / <strong>Set tee here</strong> to save tee GPS and line up the map (needed on a first round). With Auto hole out on, the putt is marked at the pin and you advance (chime). Manual rounds can still use Hole Out.</p>
       <p class="modal-note"><strong>Courses</strong> — Tap a course to set up map/tees, rename holes, and edit pars (Delete course is on that setup map only). Play starts hands-off; turn off auto-mark in Settings if you prefer marking shots yourself.</p>
       <p class="modal-note"><strong>Review map overlay</strong> — On a review hole map, Overlay can draw other games (all, last N, or pick) under the current path.</p>
       <p class="modal-note"><strong>Map circles</strong> — Tee: solid = near-tee; dashed = leave buffer. Green: solid = enter / lock green-tap; dashed = sticky leave (~150% of enter).</p>
@@ -2167,7 +2167,7 @@
   </div>
 
 <script>
-const APP_VERSION = "1.5.43";
+const APP_VERSION = "1.5.44";
 const PAGES_URL = "https://azzabazza11.github.io/golf-tracker/";
 const FEEDBACK_EMAIL = "aaron.callinan@gmail.com";
 const SUPPORT_URL = "https://ko-fi.com/aaroncallinan";
@@ -2746,6 +2746,46 @@ function getBestMarkPosition() {
   return null;
 }
 
+/** Last accepted-quality fix only — never a rejected/inaccurate raw sample. */
+function qualityGpsPos() {
+  if (!gpsGoodBuf.length) return null;
+  const last = gpsGoodBuf[gpsGoodBuf.length - 1];
+  if ((last.accuracy || 99) > sens("gpsMaxAccuracyM")) return null;
+  return { lat: last.lat, lon: last.lon, accuracy: last.accuracy };
+}
+
+/** GPS must be good before activation settle (jump / accuracy / no fix). */
+function gpsQualityBlocker() {
+  if (lastGpsDeferReason === "jump") return "jump";
+  if (lastGpsDeferReason === "accuracy") return "gps";
+  if (!qualityGpsPos()) return currentPosition ? "gps" : "nogps";
+  return null;
+}
+
+function currentHoleTeePoint() {
+  if (!currentRound) return null;
+  return knownTeeForHole(
+    currentRound.courseId,
+    currentHoleIndex,
+    currentRound.holes[currentHoleIndex]
+  );
+}
+
+function metresQualityToTee(tee) {
+  const pos = qualityGpsPos();
+  const t = tee || currentHoleTeePoint();
+  if (!pos || !t) return null;
+  return haversine(pos.lat, pos.lon, t.lat, t.lon);
+}
+
+/** Quality GPS inside tee-near radius — required before auto-tee settle. */
+function inTeeBoundsForActivation(tee) {
+  if (gpsQualityBlocker()) return false;
+  const d = metresQualityToTee(tee);
+  if (d == null) return false;
+  return d <= sens("teeNearM");
+}
+
 function teeToPinLengthM(holeIndex) {
   const idx = holeIndex == null ? currentHoleIndex : holeIndex;
   const pin = getPin(idx);
@@ -2782,7 +2822,11 @@ function gpsDiagText() {
   const cluster = getSettleCluster();
   let settle = "idle";
   if (settings.autoMark && autoMarkWatching && !isTeeingOff) {
-    if (!farEnoughToSettle()) settle = "walk to ball";
+    const hold = hybridSettleHoldReason();
+    if (hold === "jump") settle = "gps jump";
+    else if (hold === "gps") settle = "wait gps";
+    else if (hold === "tee") settle = "at tee";
+    else if (hold === "minmove") settle = "walk to ball";
     else if (cluster.settled) settle = "ready";
     else if (cluster.reason === "dwell") settle = `settling ${Math.ceil((1 - cluster.progress) * sens("autoMarkDwellS"))}s`;
     else if (cluster.reason === "spread") settle = "moving";
@@ -4662,33 +4706,52 @@ function roundAwaitingFirstTee() {
 }
 
 function metresToCurrentHoleTee() {
-  if (!currentRound || !currentPosition) return null;
-  const tee = knownTeeForHole(
-    currentRound.courseId,
-    currentHoleIndex,
-    currentRound.holes[currentHoleIndex]
-  );
+  if (!currentRound) return null;
+  const tee = currentHoleTeePoint();
   if (!tee) return null;
-  return haversine(currentPosition.lat, currentPosition.lon, tee.lat, tee.lon);
+  const pos = qualityGpsPos() || currentPosition;
+  if (!pos) return null;
+  return haversine(pos.lat, pos.lon, tee.lat, tee.lon);
 }
 
 function nearCurrentHoleTee() {
-  const d = metresToCurrentHoleTee();
-  if (d == null) return false;
-  return d <= sens("teeNearM");
+  return inTeeBoundsForActivation();
 }
 
-/** Hands-off subsequent tees: near tee + GPS ok + motion stopped before auto-tee/settle. */
+/** Hands-off subsequent tees: good GPS in tee bounds, then motion settle. */
 function teeAutoReadyState() {
-  const gps = getBestMarkPosition() || currentPosition;
   const blockers = [];
-  let accuracy = gps && gps.accuracy != null ? gps.accuracy : null;
-  if (!gps) blockers.push("nogps");
-  else if (accuracy != null && accuracy > sens("gpsMaxAccuracyM")) blockers.push("gps");
+  const pos = qualityGpsPos();
+  const raw = currentPosition;
+  const loc = pos || raw;
+  const accuracy = loc && loc.accuracy != null ? loc.accuracy : null;
+  const known = currentHoleTeePoint();
+  const dTee = loc && known ? haversine(loc.lat, loc.lon, known.lat, known.lon) : null;
+  const needQuietMs = Math.max(1000, sens("motionStopS") * 500);
+
+  const gpsBlock = gpsQualityBlocker();
+  if (gpsBlock) blockers.push(gpsBlock === "jump" ? "gps" : gpsBlock);
+
+  const inBounds = !gpsBlock && inTeeBoundsForActivation(known);
+  if (!inBounds && !gpsBlock) blockers.push("tee");
+
+  // Activation settle only after GPS is good and we are in the tee box
+  if (!inBounds) {
+    motionQuietSince = null;
+    motionLoudSince = null;
+    return {
+      ok: false,
+      blockers,
+      accuracy,
+      dTee,
+      peak: Math.round(motionPeakHold),
+      quietMs: 0,
+      needQuietMs
+    };
+  }
 
   startMotionDiagListener();
   tickMotionStopClock(Date.now());
-  const needQuietMs = Math.max(1000, sens("motionStopS") * 500);
   if (!isMotionBelowStopPeak() || !motionQuietSince) blockers.push("motion");
   else if (Date.now() - motionQuietSince < needQuietMs) blockers.push("motion_hold");
 
@@ -4696,6 +4759,7 @@ function teeAutoReadyState() {
     ok: blockers.length === 0,
     blockers,
     accuracy,
+    dTee,
     peak: Math.round(motionPeakHold),
     quietMs: motionQuietSince ? Date.now() - motionQuietSince : 0,
     needQuietMs
@@ -4710,23 +4774,15 @@ function maybeAutoTeeHandsOff() {
   if (teeHandoffInProgress) return;
   if (mapModalIsOpen()) return;
 
-  const known = knownTeeForHole(
-    currentRound.courseId,
-    currentHoleIndex,
-    currentRound.holes[currentHoleIndex]
-  );
-  const dTee = metresToCurrentHoleTee();
+  const known = currentHoleTeePoint();
+  const ready = teeAutoReadyState();
+  const dTee = ready.dTee != null ? ready.dTee : metresToCurrentHoleTee();
   if (!known) {
     // First round / unmapped hole: wait for a tap to set tee GPS and line up the map
     updateWaitingNextTeeHint(null, null);
     return;
   }
-  if (dTee == null || dTee > sens("teeNearM")) {
-    updateWaitingNextTeeHint(dTee, null);
-    return;
-  }
 
-  const ready = teeAutoReadyState();
   if (!ready.ok) {
     updateWaitingNextTeeHint(dTee, ready);
     pushTestLog("auto_tee_wait", {
@@ -4764,18 +4820,28 @@ function updateWaitingNextTeeHint(dTee, ready) {
     hole
   );
 
+  const gpsBlock = ready && ready.blockers && (
+    ready.blockers.includes("gps") || ready.blockers.includes("nogps")
+  );
+  const teeBlock = ready && ready.blockers && ready.blockers.includes("tee");
+
   let msg;
   let btnText;
   if (!known) {
     msg = `Hole ${hole.holeNumber} · tap to set tee GPS and line up the map`;
     btnText = "Set tee here";
-  } else if (!near && dTee != null) {
-    msg = `Walk to hole ${hole.holeNumber} tee · ${Math.round(dTee)} m · tap to set tee`;
-    btnText = `Walk to tee (${Math.round(dTee)} m)`;
-  } else if (!near) {
-    msg = `Walk to hole ${hole.holeNumber} tee · tap to set tee GPS`;
-    btnText = "Walk to next tee";
-  } else if (ready && ready.blockers && ready.blockers.includes("gps")) {
+  } else if (gpsBlock && near) {
+    msg = `Near hole ${hole.holeNumber} tee · waiting for GPS`;
+    btnText = "Near tee — wait for GPS";
+  } else if (!near || teeBlock) {
+    if (dTee != null) {
+      msg = `Walk to hole ${hole.holeNumber} tee · ${Math.round(dTee)} m · tap to set tee`;
+      btnText = `Walk to tee (${Math.round(dTee)} m)`;
+    } else {
+      msg = `Walk to hole ${hole.holeNumber} tee · tap to set tee GPS`;
+      btnText = "Walk to next tee";
+    }
+  } else if (gpsBlock) {
     msg = `Near hole ${hole.holeNumber} tee · waiting for GPS`;
     btnText = "Near tee — wait for GPS";
   } else if (ready && ready.blockers && (ready.blockers.includes("motion") || ready.blockers.includes("motion_hold"))) {
@@ -4904,9 +4970,11 @@ function maybeBeginTeeChime() {
     currentRound.holes[currentHoleIndex]
   );
   if (!tee) return;
-  const d = haversine(currentPosition.lat, currentPosition.lon, tee.lat, tee.lon);
+  const pos = qualityGpsPos() || currentPosition;
+  if (!pos) return;
+  const d = haversine(pos.lat, pos.lon, tee.lat, tee.lon);
   if (d > sens("teeNearM")) return;
-  if ((currentPosition.accuracy || 99) > sens("gpsMaxAccuracyM") + 4) return;
+  if ((pos.accuracy || 99) > sens("gpsMaxAccuracyM") + 4) return;
   beginTeeChimedHole = currentHoleIndex;
   playTeeNearbyChime();
   showToast(`Near tee · Hole ${currentRound.holes[currentHoleIndex].holeNumber}`);
@@ -4959,8 +5027,14 @@ function updatePlayUI() {
         btn.disabled = false;
       } else {
         const dTee = metresToCurrentHoleTee();
-        const near = dTee != null && dTee <= sens("teeNearM");
-        btn.textContent = near ? "Near tee — stop walking" : (dTee != null ? `Walk to tee (${Math.round(dTee)} m)` : "Set tee here");
+        const ready = teeAutoReadyState();
+        const gpsWait = ready.blockers && (ready.blockers.includes("gps") || ready.blockers.includes("nogps"));
+        const near = inTeeBoundsForActivation();
+        btn.textContent = gpsWait && (near || (dTee != null && dTee <= sens("teeNearM")))
+          ? "Near tee — wait for GPS"
+          : near
+            ? "Near tee — stop walking"
+            : (dTee != null ? `Walk to tee (${Math.round(dTee)} m)` : "Set tee here");
         btn.disabled = false;
         maybeAutoTeeHandsOff();
       }
@@ -4996,7 +5070,7 @@ function updatePlayUI() {
       updateWaitingTeeHint({ dist: metresToCurrentHoleTee() });
     } else if (isTeeingOff && currentRound && currentRound.mode === "handsOff") {
       clubEl.classList.remove("suggested");
-      updateWaitingNextTeeHint(metresToCurrentHoleTee(), nearCurrentHoleTee() ? teeAutoReadyState() : null);
+      updateWaitingNextTeeHint(metresToCurrentHoleTee(), teeAutoReadyState());
     } else if (isTeeingOff) {
       clubEl.classList.remove("suggested");
       clubEl.textContent = "";
@@ -9094,26 +9168,50 @@ function metresFromMarkSpot() {
 
 function metresFromAnchor() {
   if (!anchorPosition) return null;
-  const pos = currentPosition || getBestMarkPosition()
+  const pos = qualityGpsPos() || currentPosition
     || (gpsRecentBuf.length ? gpsRecentBuf[gpsRecentBuf.length - 1] : null);
   if (!pos) return null;
   return haversine(anchorPosition.lat, anchorPosition.lon, pos.lat, pos.lon);
 }
 
-/** Settle/arm stays off until the player has walked Min shot move from the last mark or tee. */
-function farEnoughToSettle() {
-  if (settleMoveCleared) return true;
-  const d = metresFromAnchor();
+/** Quality GPS still says we are on this hole's tee — do not start fairway settle/arm. */
+function stillInTeeBoundsForSettle() {
+  if (isTeeingOff) return false;
+  const d = metresQualityToTee();
   if (d == null) return false;
-  if (d >= sens("autoMarkMinShotM")) {
+  return d <= sens("teeLeaveM");
+}
+
+/**
+ * Why hybrid settle/arm must stay quiet. Check GPS + tee bounds before min-move.
+ * Does not latch settleMoveCleared.
+ */
+function hybridSettleHoldReason() {
+  const gpsBlock = gpsQualityBlocker();
+  if (gpsBlock) return gpsBlock === "jump" ? "jump" : "gps";
+  if (stillInTeeBoundsForSettle()) return "tee";
+  if (settleMoveCleared) return null;
+  const pos = qualityGpsPos();
+  if (!pos || !anchorPosition) return "minmove";
+  const d = haversine(anchorPosition.lat, anchorPosition.lon, pos.lat, pos.lon);
+  if (d >= sens("autoMarkMinShotM")) return null;
+  return "minmove";
+}
+
+/** Settle/arm stays off until GPS is good, we have left the tee, and Min shot move is reached. */
+function farEnoughToSettle() {
+  const reason = hybridSettleHoldReason();
+  if (reason) return false;
+  if (!settleMoveCleared) {
     settleMoveCleared = true;
+    const d = metresFromAnchor();
     pushTestLog("settle_move_ok", {
-      dist: Math.round(d * 10) / 10,
-      minM: sens("autoMarkMinShotM")
+      dist: d != null ? Math.round(d * 10) / 10 : null,
+      minM: sens("autoMarkMinShotM"),
+      dTee: metresQualityToTee() != null ? Math.round(metresQualityToTee() * 10) / 10 : null
     });
-    return true;
   }
-  return false;
+  return true;
 }
 
 function keepSettleQuietNearLastMark() {
@@ -9331,7 +9429,11 @@ function hybridStageTitle() {
     return "GREEN TAP ZONE";
   }
   const stage = hybridStage;
-  if (!farEnoughToSettle() && stage !== "marked") {
+  const hold = hybridSettleHoldReason();
+  if (hold && stage !== "marked") {
+    if (hold === "jump") return "GPS JUMP · wait";
+    if (hold === "gps") return "WAITING GPS";
+    if (hold === "tee") return "AT TEE · walk away";
     const d = metresFromAnchor();
     const need = sens("autoMarkMinShotM");
     const left = d == null ? need : Math.max(0, need - d);
@@ -9534,7 +9636,7 @@ function pushTestLog(type, data) {
   // #endregion
   // Rate-limit hot types that previously blew the export to ~400KB
   // Rate-limit hot types that previously blew the export to ~400KB
-  if (type === "mark_deferred" || type === "walk_audio_confirm" || type === "auto_tee_wait" || type === "green_outside" || type === "green_tap_shake") {
+  if (type === "mark_deferred" || type === "walk_audio_confirm" || type === "auto_tee_wait" || type === "settle_hold" || type === "green_outside" || type === "green_tap_shake") {
     const key = "_last_" + type;
     if (pushTestLog[key] && _now - pushTestLog[key] < 2000) return;
     pushTestLog[key] = _now;
@@ -9717,11 +9819,9 @@ function getTeeHandoffWatchTarget() {
 
 function inTeeHandoffNearZone() {
   const target = getTeeHandoffWatchTarget();
-  if (!target || !currentPosition) return false;
-  const d = haversine(
-    currentPosition.lat, currentPosition.lon,
-    target.tee.lat, target.tee.lon
-  );
+  const pos = qualityGpsPos();
+  if (!target || !pos || gpsQualityBlocker()) return false;
+  const d = haversine(pos.lat, pos.lon, target.tee.lat, target.tee.lon);
   return d <= sens("teeNearM");
 }
 
@@ -9764,10 +9864,13 @@ function checkTeeHandoffProximity() {
     return;
   }
 
-  const d = haversine(
-    currentPosition.lat, currentPosition.lon,
-    target.tee.lat, target.tee.lon
-  );
+  const pos = qualityGpsPos();
+  if (!pos || gpsQualityBlocker()) {
+    clearTeeHandoffDwell();
+    return;
+  }
+
+  const d = haversine(pos.lat, pos.lon, target.tee.lat, target.tee.lon);
 
   if (d > sens("teeLeaveM")) {
     teeHandoffChimed = false;
@@ -9885,7 +9988,7 @@ function autoTeeOffSilent() {
   if (!hole) return false;
 
   const known = knownTeeForHole(currentRound.courseId, currentHoleIndex, hole);
-  const gps = getBestMarkPosition() || currentPosition;
+  const gps = qualityGpsPos() || getBestMarkPosition() || currentPosition;
   // Prefer GPS when standing at/near known tee; never use a far-away GPS as the tee mark
   let pos = null;
   if (known && gps) {
@@ -9899,12 +10002,9 @@ function autoTeeOffSilent() {
   // Subsequent hands-off tees need a mapped/known tee (tap Set tee on a first round)
   if (currentRound.mode === "handsOff" && !roundAwaitingFirstTee()) {
     if (!known) return false;
-    const d = gps
-      ? haversine(gps.lat, gps.lon, known.lat, known.lon)
-      : Infinity;
-    if (d > sens("teeNearM")) return false;
     const ready = teeAutoReadyState();
     if (!ready.ok) return false;
+    if (qualityGpsPos()) pos = qualityGpsPos();
   }
 
   const typical = typicalClubForHole(currentRound.courseId, currentHoleIndex, 1);
@@ -10740,6 +10840,15 @@ function updateHybridAutoMark() {
 
   if (!farEnoughToSettle()) {
     keepSettleQuietNearLastMark();
+    const hold = hybridSettleHoldReason();
+    if (hold && hold !== "minmove") {
+      const q = qualityGpsPos();
+      pushTestLog("settle_hold", {
+        reason: hold,
+        accuracy: q && q.accuracy != null ? Math.round(q.accuracy * 10) / 10 : (currentPosition && currentPosition.accuracy != null ? Math.round(currentPosition.accuracy * 10) / 10 : null),
+        dTee: metresQualityToTee() != null ? Math.round(metresQualityToTee() * 10) / 10 : null
+      });
+    }
     updateAutoMarkCountdownUI();
     updateGpsDiagUI();
     updateAmStageUI();
@@ -10748,7 +10857,7 @@ function updateHybridAutoMark() {
 
   const stop = tickMotionStopClock(now);
 
-  // Watching / settling — motion stop only; GPS just refines mark spot
+  // GPS + tee bounds already passed; motion stop then arms
   if (hybridStage === "watching" || hybridStage === "settling") {
     if (stop.quiet) {
       if (hybridStage !== "settling") {

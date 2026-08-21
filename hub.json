@@ -1,7 +1,7 @@
 {
   "id": "golf-tracker",
   "title": "Golf Shot Tracker",
-  "version": "1.5.43",
+  "version": "1.5.44",
   "category": "Sports",
   "desc": "Track shot distances with GPS on the course. Tee off, mark, hole out — rounds stay on your device, no account needed.",
   "accent": "#2ecc71",
@@ -23,6 +23,11 @@
     "pwa"
   ],
   "changelog": [
+    {
+      "version": "1.5.44",
+      "date": "2026-08-21",
+      "notes": "GPS accuracy and tee-box bounds are checked before settle/arm. Auto-tee settle starts only in the tee box; fairway settle stays quiet on bad GPS or while still on the tee."
+    },
     {
       "version": "1.5.43",
       "date": "2026-08-21",
