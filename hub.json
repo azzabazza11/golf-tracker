@@ -1,7 +1,7 @@
 {
   "id": "golf-tracker",
   "title": "Golf Shot Tracker",
-  "version": "1.5.41",
+  "version": "1.5.42",
   "category": "Sports",
   "desc": "Track shot distances with GPS on the course. Tee off, mark, hole out — rounds stay on your device, no account needed.",
   "accent": "#2ecc71",
@@ -23,6 +23,11 @@
     "pwa"
   ],
   "changelog": [
+    {
+      "version": "1.5.42",
+      "date": "2026-08-21",
+      "notes": "Walk to next tee is tappable to set tee GPS and line up the map on a first round."
+    },
     {
       "version": "1.5.41",
       "date": "2026-08-21",
