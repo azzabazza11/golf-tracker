@@ -1,7 +1,7 @@
 {
   "id": "golf-tracker",
   "title": "Golf Shot Tracker",
-  "version": "1.5.44",
+  "version": "1.5.45",
   "category": "Sports",
   "desc": "Track shot distances with GPS on the course. Tee off, mark, hole out — rounds stay on your device, no account needed.",
   "accent": "#2ecc71",
@@ -23,6 +23,11 @@
     "pwa"
   ],
   "changelog": [
+    {
+      "version": "1.5.45",
+      "date": "2026-08-21",
+      "notes": "This Hole list shows live activity (teeing off, walking to ball, putting). Entering the green auto-marks the approach, then the next shot is putting."
+    },
     {
       "version": "1.5.44",
       "date": "2026-08-21",

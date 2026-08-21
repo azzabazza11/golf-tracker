@@ -822,6 +822,15 @@
     #auto-undo-bar.show { display: block; }
     .shot-list li.editable { cursor: pointer; }
     .shot-list li.editable:active { opacity: 0.85; }
+    .shot-list li.shot-pending {
+      color: var(--muted);
+      font-style: italic;
+    }
+    .shot-list li.shot-pending strong {
+      font-style: normal;
+      font-weight: 600;
+      color: var(--muted);
+    }
     .club-missing { color: var(--warning); }
     .partial-pill {
       display: inline-block;
@@ -1052,6 +1061,10 @@
     }
     .pocket-lock-shots .pocket-shot-row:last-child { border-bottom: none; }
     .pocket-lock-shots .pocket-shot-row strong { font-variant-numeric: tabular-nums; }
+    .pocket-lock-shots .pocket-shot-row.pending {
+      color: var(--muted);
+      font-style: italic;
+    }
     .pocket-lock-title {
       font-size: 18px;
       font-weight: 600;
@@ -1952,7 +1965,8 @@
       <h3 style="margin-bottom:10px">Help</h3>
       <p class="modal-note"><strong>Fairway auto-mark</strong> — After tee-off or a marked shot, settle stays quiet until GPS is accurate, you have left the tee box, and you have walked Min shot move away (to the ball). Then stand still until armed; your swing marks at that GPS spot. Walking away only plays a confirm chime (it does not wait to mark).</p>
       <p class="modal-note"><strong>Min shot move</strong> — Settle/arm does not start, and swings too close to the last mark are ignored, until you have moved this far. Inaccurate GPS or still standing on the tee will not start settle.</p>
-      <p class="modal-note"><strong>On the green</strong> — Near the pin, hybrid pauses (chime when green-tap locks). Three short phone taps mark a putt (not shakes). Calibrate taps in Settings. Once locked, the zone stays sticky past a GPS bump or a short roll off the green.</p>
+      <p class="modal-note"><strong>This Hole</strong> — The list shows live activity: Shot 1 teeing off, then walking to ball, then distance and club once marked. On the green, the approach is auto-marked and the next line is putting.</p>
+      <p class="modal-note"><strong>On the green</strong> — Near the pin, hybrid pauses (chime when green-tap locks). Arriving on the green auto-marks the approach, then putts are three short phone taps (not shakes). Calibrate taps in Settings. Once locked, the zone stays sticky past a GPS bump or a short roll off the green.</p>
       <p class="modal-note"><strong>Next tee / hole out</strong> — After leaving the green (no more taps), walk to the next tee. Auto tee waits for an accurate GPS fix inside the tee box before the stop-to-tee-off settle starts. Tap <strong>Walk to next tee</strong> / <strong>Set tee here</strong> to save tee GPS and line up the map (needed on a first round). With Auto hole out on, the putt is marked at the pin and you advance (chime). Manual rounds can still use Hole Out.</p>
       <p class="modal-note"><strong>Courses</strong> — Tap a course to set up map/tees, rename holes, and edit pars (Delete course is on that setup map only). Play starts hands-off; turn off auto-mark in Settings if you prefer marking shots yourself.</p>
       <p class="modal-note"><strong>Review map overlay</strong> — On a review hole map, Overlay can draw other games (all, last N, or pick) under the current path.</p>
@@ -2167,7 +2181,7 @@
   </div>
 
 <script>
-const APP_VERSION = "1.5.44";
+const APP_VERSION = "1.5.45";
 const PAGES_URL = "https://azzabazza11.github.io/golf-tracker/";
 const FEEDBACK_EMAIL = "aaron.callinan@gmail.com";
 const SUPPORT_URL = "https://ko-fi.com/aaroncallinan";
@@ -2546,6 +2560,7 @@ let hybridSwingAt = 0;        // when swing was seen (shot_triggered)
 let hybridMarkedUntil = 0;
 let hybridWalkChimeSpot = null; // after mark: chime once when user walks away
 let hybridWalkChimeDone = false;
+let lastHoleShotsListKey = "";
 let settleMoveCleared = false; // true once GPS has moved min shot distance from last mark/tee
 let motionQuietSince = null;  // continuous-enough quiet clock start
 let motionLoudSince = null;   // spike above stop threshold (buffer)
@@ -5003,18 +5018,7 @@ function updatePlayUI() {
   document.getElementById("play-hole-info").textContent =
     `${holeDisplayName(currentHoleIndex, currentCourse, hole)} · Par ${hole.par}`;
 
-  const list = document.getElementById("hole-shots");
-  if (hole.shots.length === 0) {
-    list.innerHTML = `<li style="color:var(--muted)">No shots yet</li>`;
-  } else {
-    list.innerHTML = hole.shots.map((s, idx) => {
-      const clubLabel = shotClubDisplayHtml(s);
-      return `<li class="editable" onclick="openClubEditLive(${idx})">
-        <span>Shot ${s.number} · ${clubLabel}${s.auto ? " · auto" : ""}</span>
-        <strong>${Math.round(s.distance)} m</strong>
-      </li>`;
-    }).join("");
-  }
+  updateHoleShotsList();
 
   const btn = document.getElementById("btn-main");
   const btnOut = document.getElementById("btn-holeout");
@@ -8546,15 +8550,17 @@ function updatePocketLockInfo() {
   }
   const shotsEl = document.getElementById("pocket-lock-shots");
   if (shotsEl) {
-    if (!hole?.shots?.length) {
-      shotsEl.innerHTML = "";
-    } else {
-      shotsEl.innerHTML = hole.shots.map(s => {
-        const club = ` · ${escapeHtml(shotClubPlain(s))}`;
-        const dist = typeof s.distance === "number" ? `${Math.round(s.distance)} m` : "—";
-        return `<div class="pocket-shot-row"><span>#${s.number}${club}</span><strong>${dist}</strong></div>`;
-      }).join("");
+    const rows = [];
+    (hole?.shots || []).forEach(s => {
+      const club = ` · ${escapeHtml(shotClubPlain(s))}`;
+      const dist = typeof s.distance === "number" ? `${Math.round(s.distance)} m` : "—";
+      rows.push(`<div class="pocket-shot-row"><span>#${s.number}${club}</span><strong>${dist}</strong></div>`);
+    });
+    const pending = currentHolePendingActivity();
+    if (pending) {
+      rows.push(`<div class="pocket-shot-row pending"><span>#${pending.number} · ${escapeHtml(pending.label)}</span><strong></strong></div>`);
     }
+    shotsEl.innerHTML = rows.join("");
   }
   updateGpsDiagUI();
   updateAmStageUI();
@@ -9352,6 +9358,7 @@ function refreshGreenTapZone(now) {
         how: clearlyInside ? "clear" : "dwell"
       });
       playGreenTapZoneChime();
+      maybeAutoMarkApproachOnGreenEnter(pos);
       maybeShowCoachTip("green_tap", "#green-zone-line");
       return true;
     }
@@ -9360,6 +9367,30 @@ function refreshGreenTapZone(now) {
 
   greenTapEnterSince = 0;
   return false;
+}
+
+/** Walk-on-green: mark the approach at this GPS, then the next shot is putting. */
+function maybeAutoMarkApproachOnGreenEnter(pos) {
+  if (!settings.autoMark || !autoMarkWatching || !currentRound || isTeeingOff) return false;
+  const hole = currentRound.holes[currentHoleIndex];
+  if (!hole || holeHasHoleOut(hole)) return false;
+  if (!anchorPosition || !pos) return false;
+  const pin = getPin(currentHoleIndex);
+  if (pin && pin.lat != null) {
+    const dAnchorPin = haversine(anchorPosition.lat, anchorPosition.lon, pin.lat, pin.lon);
+    const { leaveM } = greenTapRadii();
+    // Already on/near green from last mark — next shot is a putt
+    if (dAnchorPin <= leaveM) return false;
+  }
+  const markPos = qualityGpsPos() || pos;
+  const ok = commitHybridAutoMark(markPos, { onSwing: false, fromGreenEnter: true });
+  if (ok) {
+    pushTestLog("green_enter_mark", {
+      shotNum: hole.shots.length,
+      dPin: pin ? Math.round(haversine(markPos.lat, markPos.lon, pin.lat, pin.lon) * 10) / 10 : null
+    });
+  }
+  return ok;
 }
 
 /** Green-tap sticky zone (updates lock/hysteresis). */
@@ -9380,6 +9411,7 @@ function updateGreenZoneUI() {
   if (!settings.greenTapPutts || !settings.autoMark || !currentRound || isTeeingOff || nearTeeForGreenTapGuard()) {
     el.classList.remove("show", "in-zone");
     el.textContent = "";
+    updateHoleShotsList();
     return;
   }
   const pin = getPin(currentHoleIndex);
@@ -9390,11 +9422,13 @@ function updateGreenZoneUI() {
     el.classList.add("show");
     el.classList.remove("in-zone");
     el.textContent = "Green tap: no pin mapped for this hole";
+    updateHoleShotsList();
     return;
   }
   if (d == null) {
     el.classList.remove("show", "in-zone");
     el.textContent = "";
+    updateHoleShotsList();
     return;
   }
   const now = Date.now();
@@ -9420,6 +9454,7 @@ function updateGreenZoneUI() {
     el.classList.remove("show", "in-zone");
     el.textContent = "";
   }
+  updateHoleShotsList();
 }
 
 function hybridStageTitle() {
@@ -9783,6 +9818,63 @@ function holeHasHoleOut(hole) {
   return !!(hole && hole.shots && hole.shots.some(s => s.holeOut));
 }
 
+/** Pending line for This Hole: teeing off / walking to ball / putting. */
+function currentHolePendingActivity() {
+  if (!currentRound) return null;
+  const hole = currentRound.holes[currentHoleIndex];
+  if (!hole || holeHasHoleOut(hole)) return null;
+  const n = (hole.shots && hole.shots.length ? hole.shots.length : 0) + 1;
+  if (isTeeingOff) {
+    return { number: n, kind: "teeing", label: "teeing off" };
+  }
+  if (greenTapLocked) {
+    return { number: n, kind: "putting", label: "putting" };
+  }
+  const pin = getPin(currentHoleIndex);
+  const pos = qualityGpsPos() || currentPosition;
+  if (!settings.greenTapPutts && pin && pos) {
+    const dPin = haversine(pos.lat, pos.lon, pin.lat, pin.lon);
+    if (dPin <= sens("onGreenM") && !nearTeeForGreenTapGuard()) {
+      return { number: n, kind: "putting", label: "putting" };
+    }
+  }
+  return { number: n, kind: "walking", label: "walking to ball" };
+}
+
+function holeShotsListHtml() {
+  if (!currentRound) return "";
+  const hole = currentRound.holes[currentHoleIndex];
+  const rows = [];
+  (hole.shots || []).forEach((s, idx) => {
+    const clubLabel = shotClubDisplayHtml(s);
+    const autoBit = s.auto ? " · auto" : "";
+    rows.push(`<li class="editable" onclick="openClubEditLive(${idx})">
+        <span>Shot ${s.number} · ${clubLabel}${autoBit}</span>
+        <strong>${Math.round(s.distance)} m</strong>
+      </li>`);
+  });
+  const pending = currentHolePendingActivity();
+  if (pending) {
+    rows.push(`<li class="shot-pending">
+        <span>Shot ${pending.number} · ${escapeHtml(pending.label)}</span>
+        <strong></strong>
+      </li>`);
+  }
+  if (!rows.length) {
+    return `<li style="color:var(--muted)">No shots yet</li>`;
+  }
+  return rows.join("");
+}
+
+function updateHoleShotsList() {
+  const list = document.getElementById("hole-shots");
+  if (!list) return;
+  const html = currentRound ? holeShotsListHtml() : "";
+  if (html === lastHoleShotsListKey) return;
+  lastHoleShotsListKey = html;
+  list.innerHTML = html;
+}
+
 /** Watch next known tee while playing, or current known tee while teeing off. */
 function getTeeHandoffWatchTarget() {
   if (!settings.autoMark || !currentRound || !currentCourse) return null;
@@ -10128,6 +10220,7 @@ function noteMarkEvent(opts) {
   updateAutoMarkCountdownUI();
   updateGpsDiagUI();
   updateAmStageUI();
+  updateHoleShotsList();
 }
 
 function accelMag(ev) {
@@ -10155,6 +10248,7 @@ function ensureAutoMarkSettleTick() {
     updateAutoMarkCountdownUI();
     updateGpsDiagUI();
     updateAmStageUI();
+    updateHoleShotsList();
     if (!autoMarkWatching) {
       stopAutoMarkSettleTick();
       return;
