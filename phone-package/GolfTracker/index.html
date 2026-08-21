@@ -1950,8 +1950,8 @@
   <div id="modal-help" class="modal" onclick="if(event.target===this)closeModal()">
     <div class="modal-content" onclick="event.stopPropagation()" style="max-height:85vh;overflow:auto">
       <h3 style="margin-bottom:10px">Help</h3>
-      <p class="modal-note"><strong>Fairway auto-mark</strong> — Stand still until armed, then your swing marks at that GPS spot. Walking away only plays a confirm chime (it does not wait to mark).</p>
-      <p class="modal-note"><strong>Min shot move</strong> — Swings too close to the last mark are ignored (practice swings).</p>
+      <p class="modal-note"><strong>Fairway auto-mark</strong> — After tee-off or a marked shot, settle stays quiet until you walk Min shot move away (to the ball). Then stand still until armed; your swing marks at that GPS spot. Walking away only plays a confirm chime (it does not wait to mark).</p>
+      <p class="modal-note"><strong>Min shot move</strong> — Settle/arm does not start, and swings too close to the last mark are ignored, until you have moved this far.</p>
       <p class="modal-note"><strong>On the green</strong> — Near the pin, hybrid pauses (chime when green-tap locks). Three short phone taps mark a putt (not shakes). Calibrate taps in Settings. Once locked, the zone stays sticky past a GPS bump or a short roll off the green.</p>
       <p class="modal-note"><strong>Next tee / hole out</strong> — After leaving the green (no more taps), walk to the next tee. Tap <strong>Walk to next tee</strong> / <strong>Set tee here</strong> to save tee GPS and line up the map (needed on a first round). With Auto hole out on, the putt is marked at the pin and you advance (chime). Manual rounds can still use Hole Out.</p>
       <p class="modal-note"><strong>Courses</strong> — Tap a course to set up map/tees, rename holes, and edit pars (Delete course is on that setup map only). Play starts hands-off; turn off auto-mark in Settings if you prefer marking shots yourself.</p>
@@ -2167,7 +2167,7 @@
   </div>
 
 <script>
-const APP_VERSION = "1.5.42";
+const APP_VERSION = "1.5.43";
 const PAGES_URL = "https://azzabazza11.github.io/golf-tracker/";
 const FEEDBACK_EMAIL = "aaron.callinan@gmail.com";
 const SUPPORT_URL = "https://ko-fi.com/aaroncallinan";
@@ -2308,7 +2308,7 @@ const SENSITIVITY_PRESETS = {
 const SENSITIVITY_RANGES = {
   autoMarkSettleM: { min: 2, max: 8, step: 0.5, label: "GPS settle radius (m)" },
   autoMarkDwellS: { min: 3, max: 20, step: 1, label: "GPS cluster window (s)" },
-  autoMarkMinShotM: { min: 5, max: 20, step: 1, label: "Min shot move (m)" },
+  autoMarkMinShotM: { min: 5, max: 20, step: 1, label: "Min shot move / start settle (m)" },
   gpsMaxAccuracyM: { min: 3, max: 25, step: 1, label: "Max GPS accuracy (m)" },
   teeNearM: { min: 2, max: 8, step: 0.5, label: "Tee near radius (m)" },
   teeLeaveM: { min: 4, max: 15, step: 1, label: "Tee leave radius (m)" },
@@ -2546,6 +2546,7 @@ let hybridSwingAt = 0;        // when swing was seen (shot_triggered)
 let hybridMarkedUntil = 0;
 let hybridWalkChimeSpot = null; // after mark: chime once when user walks away
 let hybridWalkChimeDone = false;
+let settleMoveCleared = false; // true once GPS has moved min shot distance from last mark/tee
 let motionQuietSince = null;  // continuous-enough quiet clock start
 let motionLoudSince = null;   // spike above stop threshold (buffer)
 let motionPeakHold = 0;
@@ -2781,7 +2782,8 @@ function gpsDiagText() {
   const cluster = getSettleCluster();
   let settle = "idle";
   if (settings.autoMark && autoMarkWatching && !isTeeingOff) {
-    if (cluster.settled) settle = "ready";
+    if (!farEnoughToSettle()) settle = "walk to ball";
+    else if (cluster.settled) settle = "ready";
     else if (cluster.reason === "dwell") settle = `settling ${Math.ceil((1 - cluster.progress) * sens("autoMarkDwellS"))}s`;
     else if (cluster.reason === "spread") settle = "moving";
     else settle = "acquiring";
@@ -9090,6 +9092,43 @@ function metresFromMarkSpot() {
   return haversine(hybridMarkSpot.lat, hybridMarkSpot.lon, pos.lat, pos.lon);
 }
 
+function metresFromAnchor() {
+  if (!anchorPosition) return null;
+  const pos = currentPosition || getBestMarkPosition()
+    || (gpsRecentBuf.length ? gpsRecentBuf[gpsRecentBuf.length - 1] : null);
+  if (!pos) return null;
+  return haversine(anchorPosition.lat, anchorPosition.lon, pos.lat, pos.lon);
+}
+
+/** Settle/arm stays off until the player has walked Min shot move from the last mark or tee. */
+function farEnoughToSettle() {
+  if (settleMoveCleared) return true;
+  const d = metresFromAnchor();
+  if (d == null) return false;
+  if (d >= sens("autoMarkMinShotM")) {
+    settleMoveCleared = true;
+    pushTestLog("settle_move_ok", {
+      dist: Math.round(d * 10) / 10,
+      minM: sens("autoMarkMinShotM")
+    });
+    return true;
+  }
+  return false;
+}
+
+function keepSettleQuietNearLastMark() {
+  motionQuietSince = null;
+  motionLoudSince = null;
+  settleTempoWasSettling = false;
+  if (hybridStage === "settling" || hybridStage === "armed" || hybridStage === "shot_triggered") {
+    hybridStage = "watching";
+    hybridMarkSpot = null;
+    hybridArmedAt = 0;
+    hybridSwingAt = 0;
+    lastToneLegend = "";
+  }
+}
+
 function greenTapRadii() {
   const enterM = sens("onGreenM");
   const leaveM = Math.max(enterM * GREEN_TAP_LEAVE_RATIO, enterM + GREEN_TAP_LEAVE_MIN_EXTRA_M);
@@ -9292,6 +9331,12 @@ function hybridStageTitle() {
     return "GREEN TAP ZONE";
   }
   const stage = hybridStage;
+  if (!farEnoughToSettle() && stage !== "marked") {
+    const d = metresFromAnchor();
+    const need = sens("autoMarkMinShotM");
+    const left = d == null ? need : Math.max(0, need - d);
+    return left > 0.05 ? `WALK TO BALL · ${left.toFixed(0)}m` : "WALK TO BALL";
+  }
   if (stage === "settling") {
     const rem = Math.max(1, Math.ceil((1 - motionQuietProgress()) * sens("motionStopS")));
     return `SETTLING ${rem}s`;
@@ -9369,6 +9414,10 @@ function updateAmStageUI() {
 /** Test mode: rising tempo whenever stop-hold countdown is running. */
 function tickSettleTempoAudio(cluster) {
   if (!settings.testMode || !settings.markSound) {
+    settleTempoWasSettling = false;
+    return;
+  }
+  if (!farEnoughToSettle()) {
     settleTempoWasSettling = false;
     return;
   }
@@ -9966,6 +10015,7 @@ function noteMarkEvent(opts) {
   hybridSwingAt = 0;
   motionQuietSince = null;
   motionLoudSince = null;
+  settleMoveCleared = false;
   hybridStage = fromTee ? "watching" : "marked";
   hybridMarkedUntil = fromTee ? 0 : now + HYBRID_MARKED_FLASH_MS;
   if (fromTee) {
@@ -10021,6 +10071,7 @@ function getAutoMarkCountdownState() {
   }
   if (!anchorPosition) return { show: false };
   if (inGreenTapZone()) return { show: false };
+  if (!farEnoughToSettle()) return { show: false };
   const armedLike = hybridStage === "armed" || hybridStage === "shot_triggered" || hybridStage === "marked";
   if (hybridStage === "watching") {
     const p = motionQuietProgress();
@@ -10670,7 +10721,6 @@ function updateHybridAutoMark() {
   const cluster = getSettleCluster();
   const looseCluster = getSettleCluster({ loose: true });
   const now = Date.now();
-  const stop = tickMotionStopClock(now);
 
   if (hybridStage === "marked") {
     if (now >= hybridMarkedUntil) {
@@ -10678,6 +10728,7 @@ function updateHybridAutoMark() {
       lastToneLegend = "";
     }
     maybeHybridWalkChime();
+    if (!farEnoughToSettle()) keepSettleQuietNearLastMark();
     tickSettleTempoAudio(cluster);
     updateAutoMarkCountdownUI();
     updateGpsDiagUI();
@@ -10686,6 +10737,16 @@ function updateHybridAutoMark() {
 
   // Walk-away after a mark: audio confirmation only (shot already registered on swing)
   maybeHybridWalkChime();
+
+  if (!farEnoughToSettle()) {
+    keepSettleQuietNearLastMark();
+    updateAutoMarkCountdownUI();
+    updateGpsDiagUI();
+    updateAmStageUI();
+    return;
+  }
+
+  const stop = tickMotionStopClock(now);
 
   // Watching / settling — motion stop only; GPS just refines mark spot
   if (hybridStage === "watching" || hybridStage === "settling") {
