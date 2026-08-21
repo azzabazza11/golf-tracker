@@ -1953,7 +1953,7 @@
       <p class="modal-note"><strong>Fairway auto-mark</strong> — Stand still until armed, then your swing marks at that GPS spot. Walking away only plays a confirm chime (it does not wait to mark).</p>
       <p class="modal-note"><strong>Min shot move</strong> — Swings too close to the last mark are ignored (practice swings).</p>
       <p class="modal-note"><strong>On the green</strong> — Near the pin, hybrid pauses (chime when green-tap locks). Three short phone taps mark a putt (not shakes). Calibrate taps in Settings. Once locked, the zone stays sticky past a GPS bump or a short roll off the green.</p>
-      <p class="modal-note"><strong>Next tee / hole out</strong> — After leaving the green (no more taps), walk to the next tee. With Auto hole out on, the putt is marked at the pin and you advance (chime). Manual rounds can still use Hole Out.</p>
+      <p class="modal-note"><strong>Next tee / hole out</strong> — After leaving the green (no more taps), walk to the next tee. Tap <strong>Walk to next tee</strong> / <strong>Set tee here</strong> to save tee GPS and line up the map (needed on a first round). With Auto hole out on, the putt is marked at the pin and you advance (chime). Manual rounds can still use Hole Out.</p>
       <p class="modal-note"><strong>Courses</strong> — Tap a course to set up map/tees, rename holes, and edit pars (Delete course is on that setup map only). Play starts hands-off; turn off auto-mark in Settings if you prefer marking shots yourself.</p>
       <p class="modal-note"><strong>Review map overlay</strong> — On a review hole map, Overlay can draw other games (all, last N, or pick) under the current path.</p>
       <p class="modal-note"><strong>Map circles</strong> — Tee: solid = near-tee; dashed = leave buffer. Green: solid = enter / lock green-tap; dashed = sticky leave (~150% of enter).</p>
@@ -2167,7 +2167,7 @@
   </div>
 
 <script>
-const APP_VERSION = "1.5.41";
+const APP_VERSION = "1.5.42";
 const PAGES_URL = "https://azzabazza11.github.io/golf-tracker/";
 const FEEDBACK_EMAIL = "aaron.callinan@gmail.com";
 const SUPPORT_URL = "https://ko-fi.com/aaroncallinan";
@@ -4706,6 +4706,7 @@ function maybeAutoTeeHandsOff() {
   // First tee still uses Begin Round once; every later tee waits until near that tee
   if (roundAwaitingFirstTee()) return;
   if (teeHandoffInProgress) return;
+  if (mapModalIsOpen()) return;
 
   const known = knownTeeForHole(
     currentRound.courseId,
@@ -4713,13 +4714,13 @@ function maybeAutoTeeHandsOff() {
     currentRound.holes[currentHoleIndex]
   );
   const dTee = metresToCurrentHoleTee();
-  if (known) {
-    if (dTee == null || dTee > sens("teeNearM")) {
-      updateWaitingNextTeeHint(dTee, null);
-      return;
-    }
-  } else if (!(getBestMarkPosition() || currentPosition)) {
+  if (!known) {
+    // First round / unmapped hole: wait for a tap to set tee GPS and line up the map
     updateWaitingNextTeeHint(null, null);
+    return;
+  }
+  if (dTee == null || dTee > sens("teeNearM")) {
+    updateWaitingNextTeeHint(dTee, null);
     return;
   }
 
@@ -4755,14 +4756,22 @@ function updateWaitingNextTeeHint(dTee, ready) {
   const hole = currentRound.holes[currentHoleIndex];
   const btn = document.getElementById("btn-main");
   const near = dTee != null && dTee <= sens("teeNearM");
+  const known = knownTeeForHole(
+    currentRound.courseId,
+    currentHoleIndex,
+    hole
+  );
 
   let msg;
   let btnText;
-  if (!near && dTee != null) {
-    msg = `Walk to hole ${hole.holeNumber} tee · ${Math.round(dTee)} m away`;
+  if (!known) {
+    msg = `Hole ${hole.holeNumber} · tap to set tee GPS and line up the map`;
+    btnText = "Set tee here";
+  } else if (!near && dTee != null) {
+    msg = `Walk to hole ${hole.holeNumber} tee · ${Math.round(dTee)} m · tap to set tee`;
     btnText = `Walk to tee (${Math.round(dTee)} m)`;
   } else if (!near) {
-    msg = `Walk to hole ${hole.holeNumber} tee`;
+    msg = `Walk to hole ${hole.holeNumber} tee · tap to set tee GPS`;
     btnText = "Walk to next tee";
   } else if (ready && ready.blockers && ready.blockers.includes("gps")) {
     msg = `Near hole ${hole.holeNumber} tee · waiting for GPS`;
@@ -4771,14 +4780,14 @@ function updateWaitingNextTeeHint(dTee, ready) {
     msg = `Near hole ${hole.holeNumber} tee · stop walking to tee off`;
     btnText = "Near tee — stop walking";
   } else {
-    msg = `Near hole ${hole.holeNumber} tee · ready`;
+    msg = `Near hole ${hole.holeNumber} tee · ready · tap to refine tee / map`;
     btnText = "Auto teeing…";
   }
 
   clubEl.textContent = msg;
   if (btn && currentRound.mode === "handsOff") {
     btn.textContent = btnText;
-    btn.disabled = true;
+    btn.disabled = false;
   }
 }
 
@@ -4949,8 +4958,8 @@ function updatePlayUI() {
       } else {
         const dTee = metresToCurrentHoleTee();
         const near = dTee != null && dTee <= sens("teeNearM");
-        btn.textContent = near ? "Near tee — stop walking" : (dTee != null ? `Walk to tee (${Math.round(dTee)} m)` : "Walk to next tee");
-        btn.disabled = true;
+        btn.textContent = near ? "Near tee — stop walking" : (dTee != null ? `Walk to tee (${Math.round(dTee)} m)` : "Set tee here");
+        btn.disabled = false;
         maybeAutoTeeHandsOff();
       }
     } else {
@@ -5033,7 +5042,8 @@ function updatePlayUI() {
   const mapBtn = document.getElementById("btn-map");
   if (mapBtn) {
     const pin = getPin(currentHoleIndex);
-    const canMap = !!(hole.teePosition || hole.shots.length || pin);
+    const mappedTee = courseTeeForHole(currentRound.courseId, currentHoleIndex);
+    const canMap = !!(hole.teePosition || hole.shots.length || pin || mappedTee || isTeeingOff);
     mapBtn.style.display = canMap ? "block" : "none";
   }
 
@@ -5059,9 +5069,12 @@ function mainAction() {
   }
 
   if (isTeeingOff) {
-    // Hands-off: never open Tee Off modal — silent tee only
     if (currentRound && currentRound.mode === "handsOff") {
-      if (!autoTeeOffSilent()) showToast("Need GPS (or a known tee) to begin");
+      if (roundAwaitingFirstTee()) {
+        if (!autoTeeOffSilent()) showToast("Need GPS (or a known tee) to begin");
+        return;
+      }
+      setTeeHereFromPlay();
       return;
     }
     openTeeModal();
@@ -5076,6 +5089,52 @@ function mainAction() {
   );
   pendingDistance = dist;
   openConfirmModal(dist);
+}
+
+/** Hands-off next-tee wait: tap writes mapped tee GPS (does not tee off) and opens the map to align. */
+async function setTeeHereFromPlay() {
+  if (!currentRound || !currentCourse || !isTeeingOff) return;
+  const pos = getBestMarkPosition() || currentPosition;
+  if (!pos || pos.lat == null) {
+    showToast("Need a GPS fix first");
+    return;
+  }
+  const hole = currentRound.holes[currentHoleIndex];
+  const known = knownTeeForHole(currentRound.courseId, currentHoleIndex, hole);
+  const dKnown = known
+    ? haversine(pos.lat, pos.lon, known.lat, known.lon)
+    : null;
+  const relocateMaxM = Math.max(sens("teeLeaveM") * 4, 20);
+  const tooFar = known && dKnown != null && dKnown > relocateMaxM;
+
+  holePinnedByUser = true;
+
+  if (!tooFar) {
+    const ch = ensureCourseHole(currentHoleIndex);
+    ch.tee = {
+      lat: pos.lat,
+      lon: pos.lon,
+      accuracy: pos.accuracy != null ? pos.accuracy : null,
+      at: new Date().toISOString(),
+      fromPlayTap: true
+    };
+    saveData();
+    showToast("Tee GPS set — line up the map");
+    pushTestLog("play_set_tee", {
+      hole: hole.holeNumber,
+      accuracy: ch.tee.accuracy,
+      dKnown: dKnown != null ? Math.round(dKnown) : null
+    });
+  } else {
+    showToast("Walk to this hole's tee, then tap again — or long-press Set tee on the map");
+  }
+
+  await openHoleMap({ setup: true });
+  if (!tooFar && mapSession) applyMapGpsCalibNow("tee");
+  updateMapLockUI();
+  updateMapStatusLine();
+  drawHoleMap();
+  updatePlayUI();
 }
 
 function openTeeModal() {
@@ -6323,15 +6382,16 @@ function collectMapPoints(roundHole, courseHole, courseId, holeIndex, opts) {
 }
 
 function openHoleMap(opts) {
-  if (!currentRound || !currentCourse) return;
+  if (!currentRound || !currentCourse) return Promise.resolve();
   const hole = currentRound.holes[currentHoleIndex];
   const pin = getPin(currentHoleIndex);
   const setup = !!(opts && opts.setup);
-  if (!setup && !hole.teePosition && !hole.shots.length && !pin) {
+  const mappedTee = courseTeeForHole(currentRound.courseId, currentHoleIndex);
+  if (!setup && !hole.teePosition && !hole.shots.length && !pin && !mappedTee) {
     showToast("No positions to show yet");
-    return;
+    return Promise.resolve();
   }
-  openMapSession({
+  return openMapSession({
     courseId: currentCourse.id,
     holeIndex: currentHoleIndex,
     roundHole: hole,
@@ -6358,12 +6418,6 @@ async function refreshSetupMapButton() {
   const btn = document.getElementById("btn-setup-map");
   if (!btn) return;
   if (!currentRound || !currentCourse || !isTeeingOff) {
-    btn.style.display = "none";
-    return;
-  }
-  const hole = currentRound.holes[currentHoleIndex];
-  const atBegin = currentHoleIndex === 0 && hole && !hole.teePosition;
-  if (!atBegin) {
     btn.style.display = "none";
     return;
   }
@@ -9793,8 +9847,9 @@ function autoTeeOffSilent() {
   }
   if (!pos) return false;
 
-  // Subsequent hands-off tees must be in range of the known tee (Begin Round may skip this)
-  if (currentRound.mode === "handsOff" && !roundAwaitingFirstTee() && known) {
+  // Subsequent hands-off tees need a mapped/known tee (tap Set tee on a first round)
+  if (currentRound.mode === "handsOff" && !roundAwaitingFirstTee()) {
+    if (!known) return false;
     const d = gps
       ? haversine(gps.lat, gps.lon, known.lat, known.lon)
       : Infinity;
