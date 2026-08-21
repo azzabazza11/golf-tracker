@@ -557,6 +557,67 @@
     #modal-edit-course .modal-content {
       max-height: 88vh;
     }
+    #modal-map-overlay {
+      z-index: 120;
+    }
+    #modal-map-overlay .modal-content {
+      max-height: 88vh;
+    }
+    .overlay-mode-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-top: 8px;
+    }
+    .overlay-mode-grid button {
+      width: 100%;
+    }
+    .overlay-mode-grid button.active-mode {
+      background: var(--accent);
+      color: #000;
+      border-color: var(--accent);
+    }
+    .overlay-select-list {
+      max-height: 40vh;
+      overflow: auto;
+      margin-top: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .overlay-select-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 12px;
+      border-radius: 10px;
+      background: rgba(255,255,255,0.04);
+      cursor: pointer;
+    }
+    .overlay-select-row input {
+      width: 18px;
+      height: 18px;
+      flex-shrink: 0;
+    }
+    .overlay-select-row .meta {
+      flex: 1;
+      min-width: 0;
+    }
+    .overlay-select-row .meta strong {
+      display: block;
+      font-size: 14px;
+    }
+    .overlay-select-row .meta span {
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .overlay-select-row .swatch {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      box-shadow: 0 0 0 1px rgba(0,0,0,0.35);
+    }
 
     .map-toolbar {
       display: flex;
@@ -670,6 +731,7 @@
     .map-legend .leg-shot::before { background: #e67e22; }
     .map-legend .leg-pin::before { background: #2ecc71; }
     .map-legend .leg-walk::before { background: #3498db; }
+    .map-legend .leg-overlay::before { background: #9b59b6; }
     .map-legend .leg-you::before { background: #3498db; box-shadow: 0 0 0 3px rgba(52,152,219,0.35); }
     .map-legend .leg-tee-zone::before {
       background: transparent;
@@ -1675,7 +1737,8 @@
         <button type="button" class="btn-secondary" onclick="closeModal()">Close</button>
         <button type="button" class="btn-primary" onclick="shareAppLink()">Share link</button>
       </div>
-      <button type="button" class="btn-primary" style="width:100%;margin-top:10px" id="btn-install-app" onclick="promptInstallApp()">Install app</button>
+      <button type="button" class="btn-primary" style="width:100%;margin-top:10px" id="btn-install-app">Install app</button>
+      <a href="https://azzabazza11.github.io/" target="_blank" rel="noopener noreferrer" class="btn-secondary" style="display:block;width:100%;margin-top:10px;text-align:center;text-decoration:none;line-height:1.2;padding:14px 18px">More apps →</a>
       <button type="button" class="btn-secondary" style="width:100%;margin-top:10px" onclick="openFeedbackEmail()">Send feedback</button>
     </div>
   </div>
@@ -1892,6 +1955,7 @@
       <p class="modal-note"><strong>On the green</strong> — Near the pin, hybrid pauses (chime when green-tap locks). Three short phone taps mark a putt (not shakes). Calibrate taps in Settings. Once locked, the zone stays sticky past a GPS bump or a short roll off the green.</p>
       <p class="modal-note"><strong>Next tee / hole out</strong> — After leaving the green (no more taps), walk to the next tee. With Auto hole out on, the putt is marked at the pin and you advance (chime). Manual rounds can still use Hole Out.</p>
       <p class="modal-note"><strong>Courses</strong> — Tap a course to set up map/tees, rename holes, and edit pars (Delete course is on that setup map only). Play starts hands-off; turn off auto-mark in Settings if you prefer marking shots yourself.</p>
+      <p class="modal-note"><strong>Review map overlay</strong> — On a review hole map, Overlay can draw other games (all, last N, or pick) under the current path.</p>
       <p class="modal-note"><strong>Map circles</strong> — Tee: solid = near-tee; dashed = leave buffer. Green: solid = enter / lock green-tap; dashed = sticky leave (~150% of enter).</p>
       <p class="modal-note"><strong>Club suggest</strong> — If you haven’t picked a club, the app suggests your usual club for that hole/shot when known, otherwise a club for the distance to the pin. Highlighted = autofill — tap to change.</p>
       <p class="modal-note"><strong>Hole names</strong> — Optional: long-press a hole in the hole picker to set a custom name (default is Hole N).</p>
@@ -1946,6 +2010,7 @@
       <div class="map-toolbar" id="map-toolbar-photo">
         <button type="button" class="btn-danger" onclick="mapClearPhoto()">Clear photo</button>
         <button type="button" class="map-toggle" id="btn-map-walk-track" onclick="toggleWalkTrack()">Walk track</button>
+        <button type="button" class="map-toggle" id="btn-map-overlay" style="display:none" onclick="openMapOverlayPicker()">Overlay</button>
         <button type="button" class="btn-danger" id="btn-map-delete-course" style="display:none" onclick="deleteCourseFromMapSetup()">Delete course</button>
       </div>
       <div class="map-toolbar" id="map-toolbar-course-setup" style="display:none">
@@ -1978,6 +2043,7 @@
         <span class="leg-tee-zone">Tee near</span>
         <span class="leg-green-zone">Green tap</span>
         <span class="leg-walk">Walk</span>
+        <span class="leg-overlay" id="map-leg-overlay" style="display:none">Overlay</span>
         <span class="leg-you" id="map-leg-you" style="display:none">You</span>
       </div>
       <p class="modal-note" id="map-status-line" style="margin-top:6px">Add Image — a scorecard photo works great. Then Set tee &amp; pin on the photo.</p>
@@ -2012,6 +2078,28 @@
         <button type="button" class="btn-secondary" onclick="closeEditCourseModal()">Cancel</button>
         <button type="button" class="btn-primary" onclick="saveEditCourseFromMapSetup()">Save</button>
       </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Multi-round map overlay picker (review) -->
+  <div id="modal-map-overlay" class="modal" onclick="if(event.target===this)closeMapOverlayPicker()">
+    <div class="modal-content" onclick="event.stopPropagation()">
+      <h3 style="margin-bottom:8px">Round overlay</h3>
+      <p class="modal-note" style="margin-bottom:8px">Draw other games on this hole under the current path. Primary game stays bright.</p>
+      <div class="overlay-mode-grid" id="overlay-mode-grid">
+        <button type="button" class="btn-secondary" data-overlay-mode="off" onclick="setMapOverlayMode('off')">This game</button>
+        <button type="button" class="btn-secondary" data-overlay-mode="all" onclick="setMapOverlayMode('all')">All games</button>
+        <button type="button" class="btn-secondary" data-overlay-mode="recent3" onclick="setMapOverlayMode('recent',3)">Last 3</button>
+        <button type="button" class="btn-secondary" data-overlay-mode="recent5" onclick="setMapOverlayMode('recent',5)">Last 5</button>
+        <button type="button" class="btn-secondary" data-overlay-mode="recent10" onclick="setMapOverlayMode('recent',10)">Last 10</button>
+        <button type="button" class="btn-secondary" data-overlay-mode="select" onclick="setMapOverlayMode('select')">Select…</button>
+      </div>
+      <div id="overlay-select-wrap" style="display:none">
+        <div class="label" style="margin-top:12px">Games with shots on this hole</div>
+        <div class="overlay-select-list" id="overlay-select-list"></div>
+      </div>
+      <p class="modal-note" id="overlay-picker-status" style="margin-top:10px"></p>
+      <button type="button" class="btn-primary" style="width:100%;margin-top:12px" onclick="applyMapOverlayPicker()">Done</button>
     </div>
   </div>
 
@@ -2079,11 +2167,10 @@
   </div>
 
 <script>
-const APP_VERSION = "1.5.37";
+const APP_VERSION = "1.5.40";
 const PAGES_URL = "https://azzabazza11.github.io/golf-tracker/";
 const FEEDBACK_EMAIL = "aaron.callinan@gmail.com";
 const SUPPORT_URL = "https://ko-fi.com/aaroncallinan";
-const INSTALL_HINT_IOS = "On iPhone: tap Share, then Add to Home Screen.";
 const CLUBS = ["Dr","3w","5w","Hybrid","3i","4i","5i","6i","7i","8i","9i","PW","GW","SW","LW","Putter"];
 const PIN_LOCK_M = 5;
 const PIN_LOCK_MIN_SAMPLES = 3;
@@ -2280,6 +2367,11 @@ function loadSettings() {
       autoMark: !!s.autoMark,
       markSound: s.markSound !== false,
       showWalkTrack: s.showWalkTrack !== false,
+      mapOverlayMode: (s.mapOverlayMode === "all" || s.mapOverlayMode === "recent" || s.mapOverlayMode === "select")
+        ? s.mapOverlayMode : "off",
+      mapOverlayRecentN: [3, 5, 10].includes(Number(s.mapOverlayRecentN)) ? Number(s.mapOverlayRecentN) : 5,
+      mapOverlaySelected: (s.mapOverlaySelected && typeof s.mapOverlaySelected === "object")
+        ? s.mapOverlaySelected : {},
       theme: s.theme === "light" ? "light" : "dark",
       pocketLockAuto: s.pocketLockAuto !== false,
       testMode: !!s.testMode,
@@ -2305,6 +2397,9 @@ function loadSettings() {
       autoMark: false,
       markSound: true,
       showWalkTrack: true,
+      mapOverlayMode: "off",
+      mapOverlayRecentN: 5,
+      mapOverlaySelected: {},
       theme: "dark",
       pocketLockAuto: true,
       testMode: false,
@@ -2389,6 +2484,17 @@ let mapFocusShotIndex = null;
 let mapTapMode = null; // 'tee' | 'pin' | null
 let mapManualAlign = false;
 let pendingMapImageFile = null;
+const MAP_OVERLAY_COLORS = [
+  "rgba(155,89,182,0.7)",
+  "rgba(52,152,219,0.7)",
+  "rgba(241,196,15,0.7)",
+  "rgba(231,76,60,0.65)",
+  "rgba(26,188,156,0.7)",
+  "rgba(230,126,34,0.7)",
+  "rgba(149,165,166,0.7)",
+  "rgba(142,68,173,0.7)"
+];
+let mapOverlayDraftSelected = null; // temporary Set while picker open
 
 // Auto-mark + club edit (GPS-settle based; motion is diagnostics only)
 let autoMarkWatching = false;
@@ -2642,7 +2748,8 @@ function teeToPinLengthM(holeIndex) {
   const idx = holeIndex == null ? currentHoleIndex : holeIndex;
   const pin = getPin(idx);
   const hole = currentRound && currentRound.holes[idx];
-  const tee = hole && hole.teePosition;
+  const tee = (hole && hole.teePosition) ||
+    (currentRound && courseTeeForHole(currentRound.courseId, idx));
   if (!tee || !pin) return null;
   return haversine(tee.lat, tee.lon, pin.lat, pin.lon);
 }
@@ -3694,6 +3801,7 @@ function closeModal() {
     if (m.id === "modal-map") return;
     if (m.id === "modal-map-image-scope") return;
     if (m.id === "modal-edit-course") return;
+    if (m.id === "modal-map-overlay") return;
     if (m.id === "modal-star") return;
     m.classList.remove("active");
   });
@@ -3747,6 +3855,7 @@ function ensureCourseHole(index, course) {
   const h = c.holes[index];
   if (!h.drives) h.drives = [];
   if (h.pin === undefined) h.pin = null;
+  if (h.tee === undefined) h.tee = null;
   if (!h.mapAlign) h.mapAlign = { ...DEFAULT_MAP_ALIGN };
   if (!h.mapView) h.mapView = { ...DEFAULT_MAP_VIEW };
   if (h.mapLocked == null) h.mapLocked = false;
@@ -3777,6 +3886,27 @@ function setHoleCustomName(holeIndex, name) {
 function getPin(index) {
   const h = ensureCourseHole(index);
   return h && h.pin ? h.pin : null;
+}
+
+function courseById(courseId) {
+  if (currentCourse && currentCourse.id === courseId) return currentCourse;
+  if (mapSession && mapSession.course && mapSession.course.id === courseId) return mapSession.course;
+  return courses.find(c => c.id === courseId) || null;
+}
+
+/** Mapped tee GPS for a hole (long-press Set tee) — not the same as this round's tee-off. */
+function courseTeeForHole(courseId, holeIndex) {
+  const course = courseById(courseId);
+  const h = course && ensureCourseHole(holeIndex, course);
+  return h && h.tee && h.tee.lat != null ? h.tee : null;
+}
+
+function mapModalIsOpen() {
+  return !!document.getElementById("modal-map")?.classList.contains("active");
+}
+
+function isLiveMapRoundHole(rh) {
+  return !!(currentRound && rh && currentRound.holes[currentHoleIndex] === rh);
 }
 
 function distanceToPin(fromPos, holeIndex) {
@@ -5707,6 +5837,8 @@ function neighborRoundId(round, delta) {
 function knownTeeForHole(courseId, holeIndex, roundHole) {
   if (roundHole?.teePosition) return roundHole.teePosition;
   if (roundHole?.shots?.[0]?.from) return roundHole.shots[0].from;
+  const mapped = courseTeeForHole(courseId, holeIndex);
+  if (mapped) return mapped;
   const list = roundsForCourse(courseId);
   for (let i = list.length - 1; i >= 0; i--) {
     const h = list[i].holes?.[holeIndex];
@@ -6158,12 +6290,13 @@ function isOneHitToGreen(roundHole, pin) {
 function collectMapPoints(roundHole, courseHole, courseId, holeIndex, opts) {
   const pin = courseHole && courseHole.pin ? courseHole.pin : null;
   let tee = roundHole?.teePosition || (roundHole?.shots?.[0]?.from) || null;
+  const cid = courseId || (mapSession && mapSession.courseId);
+  const idx = holeIndex != null ? holeIndex : (mapSession && mapSession.holeIndex);
+  if (!tee && courseHole && courseHole.tee && courseHole.tee.lat != null) {
+    tee = courseHole.tee;
+  }
   if (!tee && !(opts && opts.skipHistoryTee)) {
-    tee = knownTeeForHole(
-      courseId || (mapSession && mapSession.courseId),
-      holeIndex != null ? holeIndex : (mapSession && mapSession.holeIndex),
-      roundHole
-    );
+    tee = knownTeeForHole(cid, idx, roundHole);
   }
   const shots = [];
   if (roundHole?.shots) {
@@ -6257,6 +6390,7 @@ async function openMapSession(session) {
   updateMapLockUI();
   updateMapHoleNavButtons();
   updateMapWalkTrackButton();
+  updateMapOverlayUI();
   updateMapCourseSetupUI();
   maybeShowCoachTip("map_zones", "#map-canvas, #modal-map .modal-content");
   await ensureCourseDefaultPhoto(session.courseId, session.course.holes.length);
@@ -6321,6 +6455,7 @@ async function mapStepHole(delta) {
   ensureCourseHole(next, mapSession.course);
   updateMapTitle();
   updateMapCourseSetupUI();
+  updateMapOverlayUI();
   updateMapHoleNavButtons();
   await loadMapImageForSession();
   recordTestEvent("map_step_hole");
@@ -6370,10 +6505,15 @@ function closeMapModal() {
   mapManualAlign = false;
   pendingMapImageFile = null;
   closeEditCourseModal();
+  closeMapOverlayPicker();
   const delBtn = document.getElementById("btn-map-delete-course");
   if (delBtn) delBtn.style.display = "none";
   const setupRow = document.getElementById("map-toolbar-course-setup");
   if (setupRow) setupRow.style.display = "none";
+  const overlayBtn = document.getElementById("btn-map-overlay");
+  if (overlayBtn) overlayBtn.style.display = "none";
+  const overlayLeg = document.getElementById("map-leg-overlay");
+  if (overlayLeg) overlayLeg.style.display = "none";
   if (mapImageUrl) {
     URL.revokeObjectURL(mapImageUrl);
     mapImageUrl = null;
@@ -6449,7 +6589,8 @@ function updateMapStatusLine() {
       : "No photo";
   if (calib && calib.tee && calib.pin) {
     const hole = mapSession.roundHole;
-    if (hole?.teePosition && h.pin) {
+    const gpsTee = (hole && hole.teePosition) || (h && h.tee);
+    if (gpsTee && h.pin) {
       el.textContent = `${photoBit} · calibrated · long-press Set tee/pin to snap GPS to your feet`;
     } else {
       el.textContent = `${photoBit} · photo tee/pin set — Tee Off & Hole Out later, or long-press Set tee/pin at GPS`;
@@ -6458,6 +6599,10 @@ function updateMapStatusLine() {
     el.textContent = "Add Image — a scorecard photo works great as one course map. Then Set tee & Set pin (GPS not required yet).";
   } else {
     el.textContent = `${photoBit} · Tap Set tee/pin on photo · long-press = GPS at your feet`;
+  }
+  const overlayN = isReviewMapSession() ? getActiveMapOverlayRounds().length : 0;
+  if (overlayN > 0) {
+    el.textContent += ` · Overlay ${overlayN} game${overlayN === 1 ? "" : "s"}`;
   }
 }
 
@@ -6508,7 +6653,8 @@ function holeHasGpsCalib(holeIndex) {
   const h = ensureCourseHole(holeIndex, mapSession.course);
   const round = getMapSessionRound();
   const rh = round?.holes?.[holeIndex];
-  return !!(h?.photoCalib?.tee && h?.photoCalib?.pin && rh?.teePosition && h.pin);
+  const gpsTee = (rh && rh.teePosition) || (h && h.tee);
+  return !!(h?.photoCalib?.tee && h?.photoCalib?.pin && gpsTee && h.pin);
 }
 
 /** Keep course-photo pan/zoom shared across holes while setting tee/pin. */
@@ -6745,7 +6891,7 @@ function gpsTargetsForCalib(cssW, cssH) {
   if (!mapSession || !mapFit) return null;
   const hole = mapSession.roundHole;
   const courseHole = ensureCourseHole(mapSession.holeIndex, mapSession.course);
-  const teeGps = hole.teePosition;
+  const teeGps = (hole && hole.teePosition) || (courseHole && courseHole.tee);
   const pinGps = courseHole && courseHole.pin;
   if (!teeGps || !pinGps) return null;
   const origin = { lat: teeGps.lat, lon: teeGps.lon };
@@ -6809,6 +6955,79 @@ function startMapTapMode(kind) {
   updateMapLockUI();
 }
 
+/** Recompute GPS→canvas fit so photo calib can snap to the just-written tee/pin. */
+function rebuildMapFitFromGps() {
+  const wrap = document.getElementById("map-canvas-wrap");
+  if (!wrap || !mapSession) return false;
+  const cssW = wrap.clientWidth;
+  const cssH = Math.max(wrap.clientHeight, 240);
+  const courseHole = ensureCourseHole(mapSession.holeIndex, mapSession.course);
+  const pts = collectMapPoints(
+    mapSession.roundHole,
+    courseHole,
+    mapSession.courseId,
+    mapSession.holeIndex,
+    { skipHistoryTee: true }
+  );
+  const youPos = currentPosition && currentPosition.lat != null
+    ? { lat: currentPosition.lat, lon: currentPosition.lon }
+    : null;
+  const origin = pts.tee
+    || pts.green
+    || youPos;
+  mapGeoOrigin = origin || null;
+  if (!origin) {
+    mapFit = computeMapFit([], cssW, cssH);
+    return false;
+  }
+  const meterPts = [];
+  if (pts.tee) meterPts.push(latLonToMeters(origin, pts.tee));
+  if (pts.green) meterPts.push(latLonToMeters(origin, pts.green));
+  if (youPos) meterPts.push(latLonToMeters(origin, youPos));
+  mapFit = computeMapFit(meterPts.length ? meterPts : [], cssW, cssH);
+  return true;
+}
+
+/** Shift photo so the tapped T sits on the GPS tee (used when pin GPS is not ready). */
+function nudgePhotoTeeToGps() {
+  if (!mapSession || !mapFit || !mapGeoOrigin) return false;
+  const h = ensureCourseHole(mapSession.holeIndex, mapSession.course);
+  if (!h?.photoCalib?.tee) return false;
+  const wrap = document.getElementById("map-canvas-wrap");
+  if (!wrap) return false;
+  const cssW = wrap.clientWidth;
+  const cssH = Math.max(wrap.clientHeight, 240);
+  const teeGps = (mapSession.roundHole && mapSession.roundHole.teePosition) || h.tee;
+  if (!teeGps || teeGps.lat == null) return false;
+  const Ft = metersToCanvas(latLonToMeters(mapGeoOrigin, teeGps), mapFit);
+  const align = getMapAlign();
+  const Lt = photoLocalToCanvas(h.photoCalib.tee, align, cssW, cssH);
+  if (!Lt) return false;
+  const dx = Ft.x - Lt.x;
+  const dy = Ft.y - Lt.y;
+  if (Math.hypot(dx, dy) < 0.5) return true;
+  align.offsetX = (align.offsetX || 0) + dx;
+  align.offsetY = (align.offsetY || 0) + dy;
+  h.mapAlign = align;
+  return true;
+}
+
+function applyMapGpsCalibNow(kind) {
+  rebuildMapFitFromGps();
+  const hole = ensureCourseHole(mapSession.holeIndex, mapSession.course);
+  if (applyPhotoCalibToAlign()) {
+    hole.mapView = { ...DEFAULT_MAP_VIEW };
+    persistMapAlign();
+    return kind === "tee" ? "Tee GPS updated — map re-aligned" : "Pin GPS updated — map re-aligned";
+  }
+  if (kind === "tee" && nudgePhotoTeeToGps()) {
+    persistMapAlign();
+    return "Tee GPS set — photo tee aligned to your position";
+  }
+  persistMapAlign();
+  return null;
+}
+
 /** Long-press Set tee / Set pin: write GPS at your feet (calibrate map vs blue accuracy circle). */
 function setMapGpsAtCurrentPosition(kind) {
   if (!mapSession) return;
@@ -6832,16 +7051,19 @@ function setMapGpsAtCurrentPosition(kind) {
       showToast("No round hole in map session");
       return;
     }
-    const prevClub = rh.teePosition && rh.teePosition.club;
-    rh.teePosition = { ...fix, club: prevClub || null };
-    if (currentRound && mapSession.roundId === currentRound.id && mapSession.holeIndex === currentHoleIndex) {
-      if (!isTeeingOff && (!anchorPosition || !rh.shots?.length)) {
-        anchorPosition = { lat: fix.lat, lon: fix.lon };
-      }
+    const ch = ensureCourseHole(mapSession.holeIndex, mapSession.course);
+    ch.tee = { ...fix };
+    // Live tee-off wait: mapped GPS must not count as this round's tee-off
+    if (!(isLiveMapRoundHole(rh) && isTeeingOff)) {
+      const prevClub = rh.teePosition && rh.teePosition.club;
+      rh.teePosition = { ...fix, club: prevClub || null };
     }
-    if (mapSession.persistRounds) saveData();
+    if (isLiveMapRoundHole(rh) && !isTeeingOff && (!anchorPosition || !rh.shots?.length)) {
+      anchorPosition = { lat: fix.lat, lon: fix.lon };
+    }
+    saveData();
     showToast("Tee GPS set to your position");
-    pushTestLog("map_gps_tee", { accuracy: fix.accuracy });
+    pushTestLog("map_gps_tee", { accuracy: fix.accuracy, mappedOnly: !!(isLiveMapRoundHole(rh) && isTeeingOff) });
   } else {
     const h = ensureCourseHole(mapSession.holeIndex, mapSession.course);
     h.pin = {
@@ -6858,16 +7080,8 @@ function setMapGpsAtCurrentPosition(kind) {
   }
 
   mapTapMode = null;
-  if (applyPhotoCalibToAlign()) {
-    const hole = ensureCourseHole(mapSession.holeIndex, mapSession.course);
-    hole.mapView = { ...DEFAULT_MAP_VIEW };
-    persistMapAlign();
-    showToast(kind === "tee"
-      ? "Tee GPS updated — map re-aligned"
-      : "Pin GPS updated — map re-aligned");
-  } else {
-    persistMapAlign();
-  }
+  const aligned = applyMapGpsCalibNow(kind);
+  if (aligned) showToast(aligned);
   updateMapLockUI();
   updateMapStatusLine();
   drawHoleMap();
@@ -7117,6 +7331,33 @@ function drawHoleMap() {
   if (greenM) meterPts.push(greenM);
   if (youM) meterPts.push(youM);
 
+  const overlayRounds = isReviewMapSession() ? getActiveMapOverlayRounds() : [];
+  const overlayMeterPaths = [];
+  overlayRounds.forEach((round, oi) => {
+    const oh = round.holes?.[mapSession.holeIndex];
+    if (!oh) return;
+    const opts = collectMapPoints(oh, courseHole, mapSession.courseId, mapSession.holeIndex, {
+      skipHistoryTee: true
+    });
+    const pathM = [];
+    if (opts.tee) {
+      const m = latLonToMeters(origin, opts.tee);
+      pathM.push(m);
+      meterPts.push(m);
+    }
+    opts.shots.forEach(s => {
+      const m = latLonToMeters(origin, s);
+      pathM.push(m);
+      meterPts.push(m);
+    });
+    if (pathM.length) {
+      overlayMeterPaths.push({
+        meters: pathM,
+        color: MAP_OVERLAY_COLORS[oi % MAP_OVERLAY_COLORS.length]
+      });
+    }
+  });
+
   const walkRaw = settings.showWalkTrack ? (mapSession.roundHole.walkTrack || []) : [];
   const walkM = walkRaw.map(p => latLonToMeters(origin, p));
   walkM.forEach(p => meterPts.push(p));
@@ -7150,6 +7391,28 @@ function drawHoleMap() {
     ctx.font = "13px sans-serif";
     ctx.fillText("Add a club map or satellite photo, then align to tee & pin", 16, 28);
   }
+
+  // Historical overlays under the primary path
+  overlayMeterPaths.forEach(op => {
+    const path = op.meters.map(m => metersToCanvas(m, mapFit));
+    if (path.length >= 2) {
+      ctx.beginPath();
+      ctx.strokeStyle = op.color;
+      ctx.lineWidth = 2.2 / Math.max(view.scale, 0.01);
+      ctx.globalAlpha = 0.85;
+      ctx.moveTo(path[0].x, path[0].y);
+      for (let i = 1; i < path.length; i++) ctx.lineTo(path[i].x, path[i].y);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+    const r = 5 / Math.max(view.scale, 0.01);
+    path.forEach(p => {
+      ctx.beginPath();
+      ctx.fillStyle = op.color;
+      ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+      ctx.fill();
+    });
+  });
 
   const path = [];
   if (teeM) path.push(metersToCanvas(teeM, mapFit));
@@ -7226,7 +7489,8 @@ function drawHoleMap() {
       youNearTee ? "rgba(255,255,255,0.12)" : "rgba(255,255,255,0.05)"
     );
   }
-  if (greenM && settings.greenTapPutts) {
+  const showGreenTapZone = !!(greenM && settings.greenTapPutts && !isTeeingOff && !youNearTee);
+  if (showGreenTapZone) {
     drawZoneCircle(
       greenM,
       greenRadii.leaveM,
@@ -7663,23 +7927,8 @@ function isIosLike() {
   return /iPhone|iPad|iPod/i.test(ua);
 }
 
-function isStandaloneDisplay() {
-  return window.matchMedia?.("(display-mode: standalone)")?.matches || window.navigator.standalone === true;
-}
-
 function updateInstallButton() {
-  const btn = document.getElementById("btn-install-app");
-  if (!btn) return;
-  if (isStandaloneDisplay()) {
-    btn.style.display = "none";
-    return;
-  }
-  btn.style.display = "";
-  btn.textContent = deferredInstallPrompt
-    ? "Install app"
-    : isIosLike()
-      ? "Add to Home Screen"
-      : "Install app";
+  window.PWAInstall?.updateUi();
 }
 
 function openShareQrModal() {
@@ -7724,21 +7973,6 @@ function openFeedbackEmail() {
     ].join("\n")
   );
   location.href = `mailto:${FEEDBACK_EMAIL}?subject=${subject}&body=${body}`;
-}
-
-async function promptInstallApp() {
-  if (isStandaloneDisplay()) {
-    showToast("Shot Tracker is already installed");
-    return;
-  }
-  if (deferredInstallPrompt) {
-    deferredInstallPrompt.prompt();
-    try { await deferredInstallPrompt.userChoice; } catch (_) {}
-    deferredInstallPrompt = null;
-    updateInstallButton();
-    return;
-  }
-  showToast(isIosLike() ? INSTALL_HINT_IOS : "Use your browser menu to install or add to home screen");
 }
 
 function openSupportLink() {
@@ -7788,6 +8022,192 @@ function toggleWalkTrack() {
   if (document.getElementById("modal-map")?.classList.contains("active")) {
     drawHoleMap();
   }
+}
+
+function isReviewMapSession() {
+  return !!(mapSession && mapSession.persistRounds && mapSession.roundId);
+}
+
+function roundHoleHasOverlayData(hole) {
+  return !!(hole && (hole.teePosition || (hole.shots && hole.shots.length)));
+}
+
+function getMapOverlayCandidateRounds() {
+  if (!mapSession) return [];
+  const holeIndex = mapSession.holeIndex;
+  return roundsForCourse(mapSession.courseId).filter(r =>
+    roundHoleHasOverlayData(r.holes?.[holeIndex])
+  );
+}
+
+function getMapOverlaySelectedIds(courseId) {
+  const raw = settings.mapOverlaySelected && settings.mapOverlaySelected[courseId];
+  return Array.isArray(raw) ? raw.slice() : [];
+}
+
+function setMapOverlaySelectedIds(courseId, ids) {
+  if (!settings.mapOverlaySelected || typeof settings.mapOverlaySelected !== "object") {
+    settings.mapOverlaySelected = {};
+  }
+  settings.mapOverlaySelected[courseId] = ids.slice();
+}
+
+function getActiveMapOverlayRounds() {
+  if (!isReviewMapSession()) return [];
+  if (!settings.mapOverlayMode || settings.mapOverlayMode === "off") return [];
+  const primaryId = mapSession.roundId;
+  const holeIndex = mapSession.holeIndex;
+  let list = getMapOverlayCandidateRounds().filter(r => r.id !== primaryId);
+  if (settings.mapOverlayMode === "recent") {
+    const n = settings.mapOverlayRecentN || 5;
+    // Include primary in the "last N" window, then drop it for drawing
+    const windowed = getMapOverlayCandidateRounds().slice(-n);
+    list = windowed.filter(r => r.id !== primaryId);
+  } else if (settings.mapOverlayMode === "select") {
+    const ids = new Set(getMapOverlaySelectedIds(mapSession.courseId));
+    list = list.filter(r => ids.has(r.id));
+  }
+  return list.filter(r => roundHoleHasOverlayData(r.holes?.[holeIndex]));
+}
+
+function updateMapOverlayUI() {
+  const btn = document.getElementById("btn-map-overlay");
+  const leg = document.getElementById("map-leg-overlay");
+  const review = isReviewMapSession();
+  if (btn) {
+    btn.style.display = review ? "" : "none";
+    const on = review && settings.mapOverlayMode && settings.mapOverlayMode !== "off";
+    const n = on ? getActiveMapOverlayRounds().length : 0;
+    btn.classList.toggle("on", !!on);
+    btn.setAttribute("aria-pressed", on ? "true" : "false");
+    if (!on) btn.textContent = "Overlay";
+    else if (settings.mapOverlayMode === "all") btn.textContent = n ? `Overlay all (${n})` : "Overlay all";
+    else if (settings.mapOverlayMode === "recent") {
+      btn.textContent = `Overlay last ${settings.mapOverlayRecentN || 5}${n ? ` · ${n}` : ""}`;
+    } else btn.textContent = n ? `Overlay ${n}` : "Overlay select";
+  }
+  if (leg) leg.style.display = (review && getActiveMapOverlayRounds().length) ? "" : "none";
+  if (review) updateMapStatusLine();
+}
+
+function closeMapOverlayPicker() {
+  document.getElementById("modal-map-overlay")?.classList.remove("active");
+  mapOverlayDraftSelected = null;
+}
+
+function overlayModeButtonKey() {
+  if (settings.mapOverlayMode === "recent") {
+    return "recent" + (settings.mapOverlayRecentN || 5);
+  }
+  return settings.mapOverlayMode || "off";
+}
+
+function refreshMapOverlayPickerUI() {
+  const key = overlayModeButtonKey();
+  document.querySelectorAll("#overlay-mode-grid [data-overlay-mode]").forEach(btn => {
+    btn.classList.toggle("active-mode", btn.getAttribute("data-overlay-mode") === key);
+  });
+  const wrap = document.getElementById("overlay-select-wrap");
+  const listEl = document.getElementById("overlay-select-list");
+  const status = document.getElementById("overlay-picker-status");
+  const selectMode = settings.mapOverlayMode === "select";
+  if (wrap) wrap.style.display = selectMode ? "" : "none";
+
+  if (selectMode && listEl && mapSession) {
+    const primaryId = mapSession.roundId;
+    const candidates = getMapOverlayCandidateRounds().filter(r => r.id !== primaryId);
+    const selected = mapOverlayDraftSelected || new Set(getMapOverlaySelectedIds(mapSession.courseId));
+    mapOverlayDraftSelected = selected;
+    if (!candidates.length) {
+      listEl.innerHTML = `<div class="empty" style="padding:16px">No other games with data on this hole.</div>`;
+    } else {
+      const all = getMapOverlayCandidateRounds();
+      listEl.innerHTML = candidates.map(r => {
+        const game = all.findIndex(x => x.id === r.id) + 1;
+        const hole = r.holes[mapSession.holeIndex];
+        const shots = hole?.shots?.length || 0;
+        const color = MAP_OVERLAY_COLORS[(game - 1) % MAP_OVERLAY_COLORS.length];
+        const checked = selected.has(r.id) ? "checked" : "";
+        return `<label class="overlay-select-row">
+          <input type="checkbox" data-overlay-id="${r.id}" ${checked} onchange="onMapOverlaySelectToggle('${r.id}', this.checked)">
+          <span class="swatch" style="background:${color}"></span>
+          <span class="meta">
+            <strong>Game ${game}${isPartialRound(r) ? " · partial" : ""}</strong>
+            <span>${new Date(r.date).toLocaleString()} · ${shots} shot${shots === 1 ? "" : "s"}</span>
+          </span>
+        </label>`;
+      }).join("");
+    }
+  }
+
+  if (status) {
+    const n = getActiveMapOverlayRounds().length;
+    if (!settings.mapOverlayMode || settings.mapOverlayMode === "off") {
+      status.textContent = "Showing this game only.";
+    } else if (!n) {
+      status.textContent = "No other games match this filter for the current hole.";
+    } else {
+      status.textContent = `Will overlay ${n} other game${n === 1 ? "" : "s"} on this hole.`;
+    }
+  }
+}
+
+function openMapOverlayPicker() {
+  if (!isReviewMapSession()) {
+    showToast("Overlay is for review maps");
+    return;
+  }
+  mapOverlayDraftSelected = new Set(getMapOverlaySelectedIds(mapSession.courseId));
+  refreshMapOverlayPickerUI();
+  document.getElementById("modal-map-overlay")?.classList.add("active");
+}
+
+function setMapOverlayMode(mode, recentN) {
+  if (mode === "recent") {
+    settings.mapOverlayMode = "recent";
+    settings.mapOverlayRecentN = [3, 5, 10].includes(Number(recentN)) ? Number(recentN) : 5;
+  } else if (mode === "all" || mode === "select" || mode === "off") {
+    settings.mapOverlayMode = mode;
+  } else {
+    settings.mapOverlayMode = "off";
+  }
+  saveSettings();
+  refreshMapOverlayPickerUI();
+  updateMapOverlayUI();
+  if (document.getElementById("modal-map")?.classList.contains("active")) drawHoleMap();
+}
+
+function onMapOverlaySelectToggle(roundId, checked) {
+  if (!mapOverlayDraftSelected) mapOverlayDraftSelected = new Set();
+  if (checked) mapOverlayDraftSelected.add(roundId);
+  else mapOverlayDraftSelected.delete(roundId);
+  if (mapSession) {
+    setMapOverlaySelectedIds(mapSession.courseId, [...mapOverlayDraftSelected]);
+    saveSettings();
+  }
+  // Preview while selecting
+  settings.mapOverlayMode = "select";
+  saveSettings();
+  refreshMapOverlayPickerUI();
+  updateMapOverlayUI();
+  if (document.getElementById("modal-map")?.classList.contains("active")) drawHoleMap();
+}
+
+function applyMapOverlayPicker() {
+  if (settings.mapOverlayMode === "select" && mapOverlayDraftSelected && mapSession) {
+    setMapOverlaySelectedIds(mapSession.courseId, [...mapOverlayDraftSelected]);
+  }
+  saveSettings();
+  closeMapOverlayPicker();
+  updateMapOverlayUI();
+  if (document.getElementById("modal-map")?.classList.contains("active")) {
+    drawHoleMap();
+    updateMapStatusLine();
+  }
+  const n = getActiveMapOverlayRounds().length;
+  if (!settings.mapOverlayMode || settings.mapOverlayMode === "off") showToast("This game only");
+  else if (!n) showToast("No overlay games for this hole");
+  else showToast(`Overlay ${n} game${n === 1 ? "" : "s"}`);
 }
 
 function onPocketLockAutoToggle(on) {
@@ -8637,6 +9057,22 @@ function resetGreenTapHoleFlags() {
   resetGreenTapZoneState();
 }
 
+/** Keep green-tap from locking at the tee (photo overlay / short GPS pin must not pause auto-mark). */
+function nearTeeForGreenTapGuard() {
+  if (!currentRound) return false;
+  const hole = currentRound.holes[currentHoleIndex];
+  const tee = knownTeeForHole(currentRound.courseId, currentHoleIndex, hole);
+  const pos = greenTapLivePos();
+  if (!tee || !pos) return false;
+  const dTee = haversine(pos.lat, pos.lon, tee.lat, tee.lon);
+  const pin = getPin(currentHoleIndex);
+  if (pin && pin.lat != null) {
+    const dPin = haversine(pos.lat, pos.lon, pin.lat, pin.lon);
+    if (dPin + 8 < dTee) return false;
+  }
+  return dTee <= Math.max(sens("teeLeaveM"), sens("onGreenM"));
+}
+
 /**
  * Sticky green zone: confirm enter (dwell or clearly inside), then stay locked
  * until outside leave radius (~150% of on-green) for leave-confirm ms.
@@ -8645,6 +9081,10 @@ function resetGreenTapHoleFlags() {
 function refreshGreenTapZone(now) {
   now = now || Date.now();
   if (!settings.greenTapPutts || !settings.autoMark || !currentRound || isTeeingOff) {
+    if (greenTapLocked || greenTapEnterSince) resetGreenTapZoneState();
+    return false;
+  }
+  if (nearTeeForGreenTapGuard()) {
     if (greenTapLocked || greenTapEnterSince) resetGreenTapZoneState();
     return false;
   }
@@ -8733,7 +9173,7 @@ function metresToPin() {
 function updateGreenZoneUI() {
   const el = document.getElementById("green-zone-line");
   if (!el) return;
-  if (!settings.greenTapPutts || !settings.autoMark || !currentRound || isTeeingOff) {
+  if (!settings.greenTapPutts || !settings.autoMark || !currentRound || isTeeingOff || nearTeeForGreenTapGuard()) {
     el.classList.remove("show", "in-zone");
     el.textContent = "";
     return;
@@ -9129,9 +9569,12 @@ function holeHasHoleOut(hole) {
 function getTeeHandoffWatchTarget() {
   if (!settings.autoMark || !currentRound || !currentCourse) return null;
   if (getActiveScreenId() !== "play") return null;
+  if (mapModalIsOpen()) return null;
   if (teeHandoffInProgress) return null;
 
   if (isTeeingOff) {
+    // First tee of a new round is Begin Round — do not silent-tee from mapped/long-press GPS
+    if (roundAwaitingFirstTee()) return null;
     const tee = knownTeeForHole(
       currentRound.courseId,
       currentHoleIndex,
@@ -10580,8 +11023,6 @@ function maybeFinishHoleClubAssign(cancelled) {
 // Init
 let splashDone = false;
 let splashJingled = false;
-let deferredInstallPrompt = null;
-
 function playSplashJingle() {
   if (splashJingled) return true;
   try {
@@ -10657,16 +11098,9 @@ if ("serviceWorker" in navigator) {
       .catch(() => {});
   });
 }
-window.addEventListener("beforeinstallprompt", e => {
-  e.preventDefault();
-  deferredInstallPrompt = e;
-  updateInstallButton();
-});
-window.addEventListener("appinstalled", () => {
-  deferredInstallPrompt = null;
-  updateInstallButton();
-});
-runSplash();
+updateInstallButton();
 </script>
+<script>window.PWA_INSTALL = { slug: 'golf-tracker', name: 'Golf Shot Tracker' };</script>
+<script src="./install.js?v=1"></script>
 </body>
 </html>
