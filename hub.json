@@ -1,12 +1,12 @@
 {
   "id": "golf-tracker",
   "title": "Golf Shot Tracker",
-  "version": "1.5.46",
+  "version": "1.5.47",
   "category": "Sports",
   "desc": "Track shot distances with GPS on the course. Tee off, mark, hole out — rounds stay on your device, no account needed.",
   "accent": "#2ecc71",
   "icon": "⛳",
-  "iconPath": "app-icon.svg",
+  "iconPath": "app-icon.png",
   "platforms": [
     "android",
     "ios",
@@ -23,6 +23,11 @@
     "pwa"
   ],
   "changelog": [
+    {
+      "version": "1.5.47",
+      "date": "2026-09-22",
+      "notes": "Colourful home-screen icon: golf ball, pin flag, and sun on a fairway sunset."
+    },
     {
       "version": "1.5.46",
       "date": "2026-08-21",
