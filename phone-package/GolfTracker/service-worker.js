@@ -1,8 +1,9 @@
-const CACHE = 'shot-tracker-v1.5.46';
+const CACHE = 'shot-tracker-v1.5.47';
 const ASSETS = [
   './manifest.webmanifest',
   './app-icon.svg',
-  './golf-tracker-qr.png'
+  './app-icon.png',
+  './golf-tracker-qr.png',
 ];
 
 self.addEventListener('install', event => {
